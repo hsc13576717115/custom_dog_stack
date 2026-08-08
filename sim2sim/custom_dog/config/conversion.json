@@ -1,0 +1,38 @@
+{
+  "freejoint": true,
+  "collision_params": {
+    "condim": 3,
+    "contype": 0,
+    "conaffinity": 1,
+    "priority": 1,
+    "solimp": [0.99, 0.999, 0.00001],
+    "solref": [0.005, 1.0],
+    "friction": [1.0, 0.01, 0.01]
+  },
+  "imus": [
+    {
+      "body_name": "base",
+      "pos": [0.0, 0.0, 0.0],
+      "rpy": [0.0, 0.0, 0.0]
+    }
+  ],
+  "cameras": [],
+  "sites": [
+    {"name": "FR_foot_site", "body_name": "FR_foot", "site_type": "sphere", "size": [0.015], "pos": [0.0, 0.0, 0.0]},
+    {"name": "FL_foot_site", "body_name": "FL_foot", "site_type": "sphere", "size": [0.015], "pos": [0.0, 0.0, 0.0]},
+    {"name": "RR_foot_site", "body_name": "RR_foot", "site_type": "sphere", "size": [0.015], "pos": [0.0, 0.0, 0.0]},
+    {"name": "RL_foot_site", "body_name": "RL_foot", "site_type": "sphere", "size": [0.015], "pos": [0.0, 0.0, 0.0]}
+  ],
+  "touch_sensors": [
+    {"body_name": "FR_foot", "site_name": "FR_foot_site", "name": "FR_foot_touch"},
+    {"body_name": "FL_foot", "site_name": "FL_foot_site", "name": "FL_foot_touch"},
+    {"body_name": "RR_foot", "site_name": "RR_foot_site", "name": "RR_foot_touch"},
+    {"body_name": "RL_foot", "site_name": "RL_foot_site", "name": "RL_foot_touch"}
+  ],
+  "remove_redundancies": true,
+  "maxhullvert": 128,
+  "angle": "radian",
+  "floor_name": "floor",
+  "add_floor": true,
+  "height_offset": 0.02
+}

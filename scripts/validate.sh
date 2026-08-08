@@ -9,6 +9,9 @@ python3 -m py_compile \
     "${project_root}/rl/src/custom_dog_rl/tasks/locomotion/velocity_env_cfg.py" \
     "${project_root}/rl/src/custom_dog_rl/agents/ppo_cfg.py" \
     "${project_root}/rl/scripts/train.py" \
-    "${project_root}/rl/scripts/play.py"
+    "${project_root}/rl/scripts/play.py" \
+    "${project_root}/sim2sim/custom_dog/postprocess_mjcf.py" \
+    "${project_root}/sim2sim/custom_dog/validate_mjcf.py" \
+    "${project_root}/sim2sim/custom_dog/run_sim2sim.py"
 
 echo "Static validation passed."

@@ -25,7 +25,7 @@ Isaac Sim/PhysX 使用 CPU，PPO 网络使用 CUDA。
 ```text
 rl/                 自有 Isaac Lab 任务、资产、PPO 和训练/导出入口
 ros2/src/           description、hardware、controller、bringup
-sim2sim/            自制狗 MuJoCo MJCF 和 ONNX 控制器（待建立）
+sim2sim/            自制狗 MuJoCo MJCF、凸包网格和 ONNX 控制器
 deploy/             部署契约与审核后的策略发布包
 docs/               架构、策略接口、流程、安全和部署说明
 scripts/            初始化、验证、训练、导出、TensorBoard、ROS 2 构建
@@ -289,70 +289,61 @@ target_position = default_joint_pos + 0.25 * policy_action
 
 ## 7. 建立自制狗 MuJoCo MJCF
 
-`unitree_mujoco` 使用 MJCF/XML，不直接加载 URDF。建议单独创建 MuJoCo 环境：
-
-```bash
-python3 -m venv /home/hsc/.venvs/custom_dog_mujoco
-source /home/hsc/.venvs/custom_dog_mujoco/bin/activate
-pip install mujoco onnxruntime numpy urdf-to-mjcf
-```
-
-建立目录：
+完整说明见 [`sim2sim/custom_dog/README.md`](sim2sim/custom_dog/README.md)。第一次运行先建立
+独立的 MuJoCo Conda 环境：
 
 ```bash
 cd /home/hsc/custom_dog_stack
-mkdir -p sim2sim/custom_dog
-export URDF2MJCF_MODEL_PATH=/home/hsc/custom_dog_stack/ros2/src
+./scripts/setup_mujoco.sh
 ```
 
-转换 URDF：
+从主 URDF 生成并验证 MJCF：
 
 ```bash
-urdf-to-mjcf \
-  ros2/src/custom_dog_description/urdf/custom_dog.urdf \
-  --output sim2sim/custom_dog/custom_dog.xml \
-  --collision-type convex_hull
+./scripts/generate_mjcf.sh
 ```
 
-转换后必须检查并修正：
+该命令自动完成：
 
 ```text
-base 是否有 freejoint
-是否有 12 个 revolute joint
-是否有 12 个 actuator
-关节轴和限位是否与 URDF 一致
-质量、惯量、摩擦和阻尼是否合理
-脚底碰撞体是否能正常接触地面
-IMU site/sensor 是否存在
-calf 2:1 传动是否只计算了一次
+URDF -> MJCF 和凸包网格
+恢复 URDF 的完整质量和惯量张量
+建立 floating_base 和 12 个位置执行器
+建立 base IMU、四个足端接触传感器和 home keyframe
+校验 nq=19、nv=18、nu=12、关节顺序、总质量和传感器契约
+执行 1 秒无界面站立冒烟测试
 ```
 
-加载检查：
+每次修改 URDF、STL、惯量、关节轴、限位或传动参数后，都必须重新执行生成命令并提交
+新的 `custom_dog.xml` 和转换网格。
+
+无 ONNX 的 10 秒位置保持测试：
 
 ```bash
-python -m mujoco.viewer \
-  --mjcf=sim2sim/custom_dog/custom_dog.xml
+./scripts/run_sim2sim.sh --duration 10
 ```
 
-基础模型检查：
+打开 MuJoCo 窗口：
 
 ```bash
-python - <<'PY'
-import mujoco
-
-path = "sim2sim/custom_dog/custom_dog.xml"
-model = mujoco.MjModel.from_xml_path(path)
-print("nq=", model.nq, "nv=", model.nv,
-      "njnt=", model.njnt, "nu=", model.nu)
-for i in range(model.njnt):
-    print(i, mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_JOINT, i))
-PY
+./scripts/run_sim2sim.sh --duration 30 --viewer
 ```
 
-对于浮动基座、12 个驱动关节的模型，`nu` 应为 12，`nq/nv` 应包含浮动基座
-自由度。具体数值以生成的 MJCF 结构为准。
+当前 10 秒位置保持测试数值稳定，但机体会有轻微滑移；在把 sim2sim 结果作为
+sim2real 依据前，还要继续优化足端简化碰撞体、摩擦以及 CAD 导出的关节偏轴。
 
 ## 8. sim2sim 控制器
+
+使用同一个训练 run 的 `policy.onnx` 和 `params/deploy.yaml`：
+
+```bash
+./scripts/run_sim2sim.sh \
+  --policy logs/rsl_rl/custom_dog_velocity/<run>/exported/policy.onnx \
+  --deploy-yaml logs/rsl_rl/custom_dog_velocity/<run>/params/deploy.yaml \
+  --command 0.3 0.0 0.0 \
+  --duration 30 \
+  --viewer
+```
 
 MuJoCo 控制器每 0.02 秒执行一次：
 
@@ -392,6 +383,10 @@ policy 输入异常时停止
 ```
 
 sim2sim 失败时先修模型和接口，不要直接修改实机参数来掩盖问题。
+
+`/home/hsc/unitree_mujoco` 是宇树官方的 MuJoCo + Unitree SDK2 桥接示例，可以用来查看
+MJCF 或参考通信结构。但自制狗使用 ROS 2 + USB 四路 RS485，不具备宇树整机 SDK2
+接口，所以本工程以 `scripts/run_sim2sim.sh` 为主路径，不直接修改该上游仓库。
 
 ## 9. ROS 2 Humble 构建
 
