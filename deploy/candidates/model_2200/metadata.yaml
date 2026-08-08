@@ -1,0 +1,7 @@
+candidate: model_2200
+training_run: 2026-08-08_15-57-41
+checkpoint_iteration: 2200
+selection_reason: highest 100-iteration moving-average training reward
+checkpoint_sha256: 0b28286e76515436b70042b69273682d727c5a0eced29953dc5645e3ead32246
+onnx_sha256: d51d89c390cbdd20898e986f7a1c7f2dc3dfcf1f0d8de95d7aecb48d401e6518
+validated_for_hardware: false

@@ -7,6 +7,7 @@ env_name="${CUSTOM_DOG_MUJOCO_ENV:-custom_dog_mujoco}"
 model_dir="${project_root}/sim2sim/custom_dog"
 urdf="${project_root}/ros2/src/custom_dog_description/urdf/custom_dog.urdf"
 mjcf="${model_dir}/custom_dog.xml"
+unitree_mjcf="${model_dir}/custom_dog_unitree.xml"
 
 if ! "${conda_exe}" env list | awk '{print $1}' | grep -Fx "${env_name}" >/dev/null; then
     echo "Missing conda environment '${env_name}'. Run ./scripts/setup_mujoco.sh first." >&2
@@ -34,4 +35,14 @@ nice -n "${CUSTOM_DOG_CONVERT_NICE:-10}" \
     "${model_dir}/validate_mjcf.py" \
     "${mjcf}"
 
+"${conda_exe}" run -n "${env_name}" python \
+    "${model_dir}/create_unitree_mjcf.py" \
+    --input "${mjcf}" \
+    --output "${unitree_mjcf}"
+
+"${conda_exe}" run -n "${env_name}" python \
+    "${model_dir}/validate_unitree_mjcf.py" \
+    "${unitree_mjcf}"
+
 echo "Generated and validated: ${mjcf}"
+echo "Generated and validated for Unitree SDK2 bridge: ${unitree_mjcf}"

@@ -12,6 +12,9 @@ python3 -m py_compile \
     "${project_root}/rl/scripts/play.py" \
     "${project_root}/sim2sim/custom_dog/postprocess_mjcf.py" \
     "${project_root}/sim2sim/custom_dog/validate_mjcf.py" \
-    "${project_root}/sim2sim/custom_dog/run_sim2sim.py"
+    "${project_root}/sim2sim/custom_dog/create_unitree_mjcf.py" \
+    "${project_root}/sim2sim/custom_dog/validate_unitree_mjcf.py" \
+    "${project_root}/sim2sim/custom_dog/run_sim2sim.py" \
+    "${project_root}/sim2sim/unitree_deploy/prepare_controller.py"
 
 echo "Static validation passed."

@@ -1,0 +1,7 @@
+candidate: model_4999
+training_run: 2026-08-08_15-57-41
+checkpoint_iteration: 4999
+selection_reason: final checkpoint after velocity curriculum reached 0.8
+checkpoint_sha256: a08bbb45baa8861923a4fa74962e9d53b1cbc38ba550eeb1716368fda740cc25
+onnx_sha256: 11175a12c3ecffe630adb0b909777dbfa461c4f40e4971674d40a101951e269e
+validated_for_hardware: false

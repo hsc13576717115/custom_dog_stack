@@ -312,6 +312,11 @@ URDF -> MJCF 和凸包网格
 建立 base IMU、四个足端接触传感器和 home keyframe
 校验 nq=19、nv=18、nu=12、关节顺序、总质量和传感器契约
 执行 1 秒无界面站立冒烟测试
+
+同时生成官方 SDK2 bridge 使用的 `sim2sim/custom_dog/custom_dog_unitree.xml`。该版本
+使用 12 个 torque motor，并将传感器按位置、速度、执行器力矩、IMU 的原始地址排列；
+不依赖足端接触传感器。训练用的 `custom_dog.xml` 仍保留 position actuator 和仿真
+接触传感器，两者用途不同。
 ```
 
 每次修改 URDF、STL、惯量、关节轴、限位或传动参数后，都必须重新执行生成命令并提交
@@ -384,9 +389,18 @@ policy 输入异常时停止
 
 sim2sim 失败时先修模型和接口，不要直接修改实机参数来掩盖问题。
 
-`/home/hsc/unitree_mujoco` 是宇树官方的 MuJoCo + Unitree SDK2 桥接示例，可以用来查看
-MJCF 或参考通信结构。但自制狗使用 ROS 2 + USB 四路 RS485，不具备宇树整机 SDK2
-接口，所以本工程以 `scripts/run_sim2sim.sh` 为主路径，不直接修改该上游仓库。
+`/home/hsc/unitree_mujoco` 是宇树官方 MuJoCo + Unitree SDK2 桥接示例，本项目已经为
+自制模型准备了相同的 SDK2 数据格式。官方闭环命令为：
+
+```bash
+./scripts/run_unitree_sim2sim.sh deploy/candidates/model_4999
+```
+
+执行前需按 [`docs/unitree_mujoco_startup_patch.md`](docs/unitree_mujoco_startup_patch.md)
+在两个上游工作区应用启动时序补丁并重新构建。该命令验证的是 MJCF、DDS、SDK2
+`LowState/LowCmd` 和 ONNX controller 的接口闭环；默认零速度指令，不代表当前策略已经
+学会稳定行走。策略效果以 [`docs/training_report_2026-08-08_15-57-41.md`](docs/training_report_2026-08-08_15-57-41.md)
+中的 5000 轮分析和后续 sim2sim 结果为准。
 
 ## 9. ROS 2 Humble 构建
 
