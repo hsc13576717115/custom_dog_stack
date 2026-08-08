@@ -14,7 +14,12 @@
 
 ## 阶段二：sim2sim
 
-在 `unitree_mujoco` 中使用同一份 URDF、关节顺序、默认姿态、动作缩放和关节限制。
+`unitree_mujoco` 使用 MJCF，不会直接加载 URDF。因此需要先把
+`ros2/src/custom_dog_description/urdf/custom_dog.urdf` 转换为等价的
+`custom_dog.xml`，或使用 MuJoCo Python API 创建等价模型。转换后的模型必须保持
+同一套几何尺寸、质量/惯量、关节轴、关节顺序、默认姿态、动作缩放和关节限制。
+当前上游 `unitree_mujoco` 自带的是 Go2 等 Unitree 场景；自制狗需要单独添加
+`unitree_robots/custom_dog/` 场景和控制适配器，不能把 Go2 的 XML 直接当作最终验证模型。
 至少验收站立、前后左右速度、转向、随机扰动恢复、关节限位和策略断开后的停止行为。
 sim2sim 失败时先修模型、坐标系、零点和执行器参数，不把问题直接带到实机。
 
