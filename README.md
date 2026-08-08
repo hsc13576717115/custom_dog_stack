@@ -402,7 +402,47 @@ sim2sim 失败时先修模型和接口，不要直接修改实机参数来掩盖
 学会稳定行走。策略效果以 [`docs/training_report_2026-08-08_15-57-41.md`](docs/training_report_2026-08-08_15-57-41.md)
 中的 5000 轮分析和后续 sim2sim 结果为准。
 
-## 9. ROS 2 Humble 构建
+## 9. 查看可视化效果
+
+TensorBoard 曲线：
+
+```bash
+./scripts/tensorboard.sh
+# 浏览器打开 http://localhost:6006
+```
+
+Isaac Lab 同域 playback（需要 Isaac Sim 能创建 Vulkan/RTX 图形设备）：
+
+```bash
+./scripts/view_isaac_policy.sh \
+  logs/rsl_rl/custom_dog_velocity/2026-08-08_15-57-41/model_4999.pt
+```
+
+标准 MuJoCo policy playback（WSL 当前可用）：
+
+```bash
+./scripts/view_mujoco_policy.sh deploy/candidates/model_4999 0.3 0.0 0.0
+```
+
+官方 Unitree MuJoCo + SDK2 bridge playback：
+
+```bash
+./scripts/run_unitree_sim2sim.sh deploy/candidates/model_4999
+```
+
+本机实测标准 MuJoCo 30 秒的 `model_4999` 在 `0.3 m/s` 指令下只移动约 `0.0063 m`，
+没有形成正常步态；ONNX CPU 推理均值约 `0.152 ms`。官方 bridge 能连接并进入
+`Velocity`，随后因策略姿态异常回到 `Passive`。这两个结果说明接口和渲染路径正常，
+但当前策略还没有达到稳定行走效果。
+
+当前 WSL 的 Isaac GUI 实测失败于 `No device could be created`、`Graphics plugins not
+available` 和 `nvidia-smi not found in /usr/bin`。PyTorch CUDA 和 CPU PhysX 训练不受
+这个图形问题影响；要看 Isaac 画面，请在原生 Ubuntu 22.04 或 Windows 11 的 Isaac Sim
+工作站环境运行同一个 `view_isaac_policy.sh`，或修复 WSL 的 Vulkan 驱动后重新测试。NVIDIA
+当前安装文档列出的工作站系统是 Ubuntu 22.04/24.04 或 Windows 11，并要求兼容的 RTX
+GPU/驱动：[Isaac Sim requirements](https://docs.isaacsim.omniverse.nvidia.com/latest/installation/requirements.html)。
+
+## 10. ROS 2 Humble 构建
 
 当前仓库已经提供四个 ROS 2 包：
 
@@ -432,7 +472,7 @@ ros2 launch custom_dog_description display.launch.py
 GOM-8010-6 协议。`config/hardware.yaml` 中的端口、ID、方向和零点都是待标定值，
 `validated: false` 时禁止启动实机策略。
 
-## 10. Orin NX Super 部署
+## 11. Orin NX Super 部署
 
 目标设备需要准备：
 
@@ -478,7 +518,7 @@ RS485 读取 12 个电机状态和 IMU
 
 通信超时、CRC 错误、过温、越限、急停或 observation 异常时必须进入零输出或阻尼状态。
 
-## 11. 香橙派 5 Plus
+## 12. 香橙派 5 Plus
 
 香橙派 5 Plus 可以作为策略推理主机，但不能替代 RTX 4060 训练机，也不能运行 Isaac Sim。
 
@@ -492,7 +532,7 @@ ARM64 ONNX Runtime + CPU 推理
 香橙派必须重新测量 ONNX 延迟、RS485 调度抖动、内存和温度，不能直接假设与 Orin NX
 性能相同。实机首版建议先在 Orin NX 完成闭环，再迁移到香橙派做对比。
 
-## 12. 故障排查
+## 13. 故障排查
 
 WSL 中看到：
 
