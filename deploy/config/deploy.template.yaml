@@ -1,0 +1,34 @@
+schema_version: 1
+validated_for_hardware: false
+
+policy:
+  observation_dim: 45
+  action_dim: 12
+  step_dt: 0.02
+  action_scale: 0.25
+
+sdk_joint_order:
+  - FR_hip_joint
+  - FR_thigh_joint
+  - FR_calf_joint
+  - FL_hip_joint
+  - FL_thigh_joint
+  - FL_calf_joint
+  - RR_hip_joint
+  - RR_thigh_joint
+  - RR_calf_joint
+  - RL_hip_joint
+  - RL_thigh_joint
+  - RL_calf_joint
+
+# Replace this section with the values exported beside each checkpoint.
+exported_contract:
+  deploy_yaml: null
+  policy_sha256: null
+  training_git_commit: null
+
+safety:
+  command_timeout_ms: 100
+  require_estop: true
+  require_hanging_test: true
+  max_motor_temperature_c: null

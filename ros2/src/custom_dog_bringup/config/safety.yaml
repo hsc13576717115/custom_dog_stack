@@ -1,0 +1,10 @@
+schema_version: 1
+validated: false
+
+control_frequency_hz: 50
+command_timeout_ms: 100
+require_physical_estop: true
+require_motor_state_valid: true
+stop_on_over_temperature: true
+max_motor_temperature_c: null
+max_consecutive_bus_errors: 3

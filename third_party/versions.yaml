@@ -1,0 +1,23 @@
+schema_version: 1
+
+dependencies:
+  isaac_lab:
+    repository: https://github.com/isaac-sim/IsaacLab.git
+    commit: 3c6e67bb5c7ada942a6d1884ab69338f57596f77
+    local_path: /home/hsc/IsaacLab
+  unitree_rl_lab:
+    repository: https://github.com/unitreerobotics/unitree_rl_lab.git
+    commit: 4960b84732b0c2ec593dccbfe963fda1bcd7b1e3
+    local_path: /home/hsc/unitree_rl_lab
+  unitree_mujoco:
+    repository: https://github.com/unitreerobotics/unitree_mujoco.git
+    commit: ae6a8403e272733e9996ef59990880330496177f
+    local_path: /home/hsc/unitree_mujoco
+
+runtime:
+  operating_system: Ubuntu 22.04 under WSL 2
+  isaac_sim: "5.1"
+  python: "3.11"
+  pytorch: "2.7.0+cu128"
+  ros_distribution: humble
+  deployment_target: Jetson Orin NX, Ubuntu 22.04, ROS 2 Humble

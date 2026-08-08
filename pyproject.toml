@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "custom-dog-rl"
+version = "0.1.0"
+description = "Isaac Lab training extension for the custom quadruped"
+requires-python = ">=3.10"
+
+[tool.setuptools.packages.find]
+where = ["rl/src"]
+include = ["custom_dog_rl*"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"

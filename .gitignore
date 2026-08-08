@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.venv/
+
+# Isaac Sim / Isaac Lab generated files
+logs/
+outputs/
+*.usd
+*.usda
+*.usdc
+.cache/
+.omniverse/
+
+# Training artifacts. Promote only reviewed ONNX files under deploy/releases.
+*.pt
+*.pth
+*.ckpt
+events.out.tfevents.*
+
+# ROS 2 / colcon
+build/
+install/
+log/
+
+# Editors and operating systems
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Local configuration
+.env

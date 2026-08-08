@@ -1,0 +1,15 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>custom_dog_bringup</name>
+  <version>0.1.0</version>
+  <description>Launch and parameter composition for the custom quadruped.</description>
+  <maintainer email="1583924560@qq.com">hsc</maintainer>
+  <license>Proprietary</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <exec_depend>custom_dog_description</exec_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

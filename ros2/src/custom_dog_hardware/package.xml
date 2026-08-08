@@ -1,0 +1,14 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>custom_dog_hardware</name>
+  <version>0.1.0</version>
+  <description>Transport boundary for four RS485 buses and GO-M8010-6 motors.</description>
+  <maintainer email="1583924560@qq.com">hsc</maintainer>
+  <license>Proprietary</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

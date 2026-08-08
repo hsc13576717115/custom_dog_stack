@@ -1,0 +1,31 @@
+schema_version: 1
+validated: false
+baud_rate: 4000000
+
+# One RS485 bus per leg. Device names, IDs, directions and zero offsets must be
+# measured on the actual Orin NX before this file is enabled.
+buses:
+  FR:
+    device: /dev/ttyUSB0
+    motors:
+      - {joint: FR_hip_joint, motor_id: 0, direction: 1, zero_offset: null}
+      - {joint: FR_thigh_joint, motor_id: 1, direction: 1, zero_offset: null}
+      - {joint: FR_calf_joint, motor_id: 2, direction: 1, zero_offset: null}
+  FL:
+    device: /dev/ttyUSB1
+    motors:
+      - {joint: FL_hip_joint, motor_id: 0, direction: 1, zero_offset: null}
+      - {joint: FL_thigh_joint, motor_id: 1, direction: 1, zero_offset: null}
+      - {joint: FL_calf_joint, motor_id: 2, direction: 1, zero_offset: null}
+  RR:
+    device: /dev/ttyUSB2
+    motors:
+      - {joint: RR_hip_joint, motor_id: 0, direction: 1, zero_offset: null}
+      - {joint: RR_thigh_joint, motor_id: 1, direction: 1, zero_offset: null}
+      - {joint: RR_calf_joint, motor_id: 2, direction: 1, zero_offset: null}
+  RL:
+    device: /dev/ttyUSB3
+    motors:
+      - {joint: RL_hip_joint, motor_id: 0, direction: 1, zero_offset: null}
+      - {joint: RL_thigh_joint, motor_id: 1, direction: 1, zero_offset: null}
+      - {joint: RL_calf_joint, motor_id: 2, direction: 1, zero_offset: null}
