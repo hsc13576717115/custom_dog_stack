@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import math
 import time
 from pathlib import Path
 from typing import TextIO
@@ -42,6 +43,9 @@ HOME_SDK = np.array(
     [-0.1, 0.8, -1.5, 0.1, 0.8, -1.5, -0.1, 0.8, -1.5, 0.1, 0.8, -1.5],
     dtype=np.float64,
 )
+
+DIRECT_TORQUE_SPEED = (13.5, 30.0, 20.2, 23.4)
+CALF_TORQUE_SPEED = (6.75, 15.0, 40.4, 46.8)
 
 
 def object_names(model: mujoco.MjModel, object_type: mujoco.mjtObj, count: int) -> list[str]:
@@ -116,6 +120,19 @@ class PolicyController:
             raise ValueError("Could not resolve all policy joints in MJCF")
         self.qpos_addresses = model.jnt_qposadr[joint_ids].copy()
         self.dof_addresses = model.jnt_dofadr[joint_ids].copy()
+        sdk_joint_ids = np.array(
+            [mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, name) for name in SDK_JOINT_ORDER],
+            dtype=np.int32,
+        )
+        self.sdk_qpos_addresses = model.jnt_qposadr[sdk_joint_ids].copy()
+        self.sdk_dof_addresses = model.jnt_dofadr[sdk_joint_ids].copy()
+
+        policy_stiffness = vector(self.cfg["stiffness"], 12, "stiffness")
+        policy_damping = vector(self.cfg["damping"], 12, "damping")
+        self.sdk_stiffness = np.empty(12, dtype=np.float64)
+        self.sdk_damping = np.empty(12, dtype=np.float64)
+        self.sdk_stiffness[self.joint_map] = policy_stiffness
+        self.sdk_damping[self.joint_map] = policy_damping
 
         self.base_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, "base")
         self.gyro_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_SENSOR, "base_gyro")
@@ -152,6 +169,8 @@ class PolicyController:
                 ("joint_dq", 12),
                 ("ang_vel", 3),
                 ("projected_gravity", 3),
+                ("base_pos", 3),
+                ("base_quat", 4),
             ):
                 header.extend(f"{prefix}_{index}" for index in range(count))
             self.trace_writer.writerow(header)
@@ -223,10 +242,28 @@ class PolicyController:
                 data.qvel[self.dof_addresses],
                 angular_velocity,
                 projected_gravity,
+                data.qpos[:3],
+                data.qpos[3:7],
             ):
                 row.extend(float(value) for value in values)
             self.trace_writer.writerow(row)
             self.trace_stream.flush()
+
+    def apply_actuator_limits(self, model: mujoco.MjModel, data: mujoco.MjData) -> None:
+        """Match the Unitree torque-speed clipping used during Isaac training."""
+        joint_pos = data.qpos[self.sdk_qpos_addresses]
+        joint_vel = data.qvel[self.sdk_dof_addresses]
+        desired_effort = self.sdk_stiffness * (data.ctrl - joint_pos) - self.sdk_damping * joint_vel
+
+        for index, joint_name in enumerate(SDK_JOINT_ORDER):
+            x1, x2, y1, y2 = CALF_TORQUE_SPEED if "calf" in joint_name else DIRECT_TORQUE_SPEED
+            full_torque = y1 if joint_vel[index] * desired_effort[index] > 0.0 else y2
+            speed = abs(joint_vel[index])
+            if speed < x1:
+                limit = full_torque
+            else:
+                limit = max(0.0, full_torque * (x2 - speed) / (x2 - x1))
+            model.actuator_forcerange[index] = (-limit, limit)
 
     def close(self) -> None:
         if self.trace_stream is not None:
@@ -243,6 +280,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--deploy-yaml", type=Path, help="params/deploy.yaml from the same training run")
     parser.add_argument("--command", nargs=3, type=float, metavar=("VX", "VY", "YAW"), default=(0, 0, 0))
     parser.add_argument("--duration", type=float, default=10.0)
+    parser.add_argument("--warmup", type=float, default=2.0, help="Seconds excluded from tracking metrics")
     parser.add_argument("--trace", type=Path, help="Write policy observations and actions to CSV")
     parser.add_argument(
         "--trace-limit",
@@ -257,6 +295,8 @@ def parse_args() -> argparse.Namespace:
         parser.error("--policy and --deploy-yaml must be supplied together")
     if args.duration <= 0:
         parser.error("--duration must be positive")
+    if args.warmup < 0 or args.warmup >= args.duration:
+        parser.error("--warmup must be non-negative and shorter than --duration")
     if args.trace_limit < 0:
         parser.error("--trace-limit must be non-negative")
     return args
@@ -298,12 +338,28 @@ def run(args: argparse.Namespace) -> None:
 
         viewer_handle = viewer.launch_passive(model, data)
 
+    metric_start_pos = None
+    metric_start_time = None
+    heights: list[float] = []
+    tilt_angles: list[float] = []
+    body_linear_velocities: list[np.ndarray] = []
+    body_yaw_rates: list[float] = []
+    foot_body_ids = np.array(
+        [mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, f"{leg}_foot") for leg in ("FR", "FL", "RR", "RL")],
+        dtype=np.int32,
+    )
+    if np.any(foot_body_ids < 0):
+        raise ValueError("MJCF must contain all four foot bodies")
+    contact_samples: list[np.ndarray] = []
+
     try:
         for step in range(total_steps):
             if viewer_handle is not None and not viewer_handle.is_running():
                 break
             if controller is not None and step % controller.decimation == 0:
                 controller.update(model, data)
+            if controller is not None:
+                controller.apply_actuator_limits(model, data)
             mujoco.mj_step(model, data)
             if not np.isfinite(data.qpos).all() or not np.isfinite(data.qvel).all():
                 raise RuntimeError(f"Simulation became non-finite at step {step}")
@@ -314,6 +370,23 @@ def run(args: argparse.Namespace) -> None:
                 delay = target_time - time.perf_counter()
                 if delay > 0:
                     time.sleep(delay)
+            if data.time >= args.warmup:
+                if metric_start_pos is None:
+                    metric_start_pos = data.qpos[:3].copy()
+                    metric_start_time = float(data.time)
+                heights.append(float(data.qpos[2]))
+                rotation_world_from_base = data.xmat[model.body("base").id].reshape(3, 3)
+                projected_gravity = rotation_world_from_base.T @ np.array([0.0, 0.0, -1.0])
+                tilt_angles.append(math.acos(float(np.clip(-projected_gravity[2], -1.0, 1.0))))
+                body_linear_velocities.append(rotation_world_from_base.T @ data.qvel[:3])
+                body_yaw_rates.append(float(data.sensordata[controller.gyro_address + 2]) if controller else 0.0)
+                foot_contacts = np.zeros(4, dtype=bool)
+                for contact in data.contact:
+                    if contact.efc_address < 0:
+                        continue
+                    body_ids = (model.geom_bodyid[contact.geom1], model.geom_bodyid[contact.geom2])
+                    foot_contacts |= np.isin(foot_body_ids, body_ids)
+                contact_samples.append(foot_contacts)
     finally:
         if viewer_handle is not None:
             viewer_handle.close()
@@ -324,6 +397,33 @@ def run(args: argparse.Namespace) -> None:
     print(f"sim2sim OK: {mode}")
     print(f"simulated={data.time:.3f} s, wall={elapsed:.3f} s, real-time-factor={data.time / elapsed:.2f}")
     print(f"base position=[{data.qpos[0]:.4f}, {data.qpos[1]:.4f}, {data.qpos[2]:.4f}]")
+    if controller is not None and metric_start_pos is not None and metric_start_time is not None:
+        metric_duration = float(data.time) - metric_start_time
+        displacement = data.qpos[:3] - metric_start_pos
+        mean_body_velocity = np.mean(np.asarray(body_linear_velocities), axis=0)
+        forward_speed = float(mean_body_velocity[0])
+        lateral_speed = float(mean_body_velocity[1])
+        speed_error = abs(forward_speed - float(controller.command[0]))
+        contacts = np.asarray(contact_samples, dtype=np.int8)
+        transitions = np.count_nonzero(np.diff(contacts, axis=0), axis=0)
+        duty_factors = contacts.mean(axis=0)
+        print(
+            f"tracking: command_vx={controller.command[0]:.3f} m/s, "
+            f"mean_vx={forward_speed:.3f} m/s, abs_error={speed_error:.3f} m/s, "
+            f"mean_vy={lateral_speed:.3f} m/s, mean_yaw_rate={np.mean(body_yaw_rates):.3f} rad/s"
+        )
+        print(f"world displacement=[{displacement[0]:.3f}, {displacement[1]:.3f}] m")
+        print(
+            f"stability: min_height={min(heights):.3f} m, "
+            f"mean_height={np.mean(heights):.3f} m, "
+            f"max_tilt={math.degrees(max(tilt_angles)):.2f} deg"
+        )
+        print(
+            "contacts: duty=[{}], transitions=[{}]".format(
+                ", ".join(f"{value:.2f}" for value in duty_factors),
+                ", ".join(str(int(value)) for value in transitions),
+            )
+        )
     if controller is not None and controller.inference_times_ms:
         samples = np.asarray(controller.inference_times_ms)
         print(

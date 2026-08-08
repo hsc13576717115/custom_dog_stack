@@ -25,5 +25,5 @@ python rl/scripts/train.py \
     --num_envs "${num_envs}" \
     --max_iterations "${max_iterations}" \
     --seed "${CUSTOM_DOG_SEED:-42}" \
-    --kit_args "${kit_args}" \
-    "$@"
+    "$@" \
+    --kit_args "${kit_args}"

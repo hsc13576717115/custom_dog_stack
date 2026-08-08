@@ -238,6 +238,102 @@ CUSTOM_DOG_MAX_ITERATIONS=500 \
 该任务把训练速度限制为 `vx ±0.3`、`vy ±0.15`、`yaw ±0.5`，并加入初始姿态和
 关节偏差。结果见 [`docs/robust_finetune_report_2026-08-08.md`](docs/robust_finetune_report_2026-08-08.md)。
 
+### 自然步态发现阶段
+
+现有 `Robust-v0` 和 `model_5498_robust` 保留为稳定站立基线。不要在该配置上原样
+追加长训练。自然步态实验使用独立任务 `CustomDog-Velocity-Gait-v1`：
+
+- actor observation 仍为 45 维，不增加 gait phase；
+- 不使用 `feet_gait` 显式相位奖励；
+- 5% 环境训练零速站立，其余环境使用 `vx 0.2~0.5 m/s`、`vy ±0.05 m/s`、
+  `yaw ±0.15 rad/s`；
+- 暂时关闭周期推扰，收窄摩擦、质量和 reset 随机化；
+- 增加存活奖励和非超时失败惩罚，降低姿态回归与 action-rate 惩罚；
+- 步态涌现前暂时关闭会持续产生负值的 air-time 风格项，避免策略通过主动倾倒
+  提前结束负回报 episode。
+
+先做 100 轮健康检查：
+
+```bash
+CUSTOM_DOG_TASK=CustomDog-Velocity-Gait-v1 \
+CUSTOM_DOG_NUM_ENVS=128 \
+CUSTOM_DOG_MAX_ITERATIONS=100 \
+./scripts/train.sh --run_name gait_v1_smoke
+```
+
+确认无 NaN、checkpoint 正常保存后，从随机初始化训练 2000 轮。这里不要使用
+`--resume` 加载站立策略，因为站立策略和原 optimizer 可能强化当前局部最优：
+
+```bash
+CUSTOM_DOG_TASK=CustomDog-Velocity-Gait-v1 \
+CUSTOM_DOG_NUM_ENVS=128 \
+CUSTOM_DOG_MAX_ITERATIONS=2000 \
+./scripts/train.sh --run_name gait_v1_natural
+```
+
+每 100 轮回放一次 checkpoint，固定测试 `vx=0.2` 和 `vx=0.5`。验收依据是实际
+前进速度、线速度误差、四足接触周期和动作周期性，而不是只看 total reward。
+若 1000~2000 轮后仍然只站立，再建立带弱 `feet_gait` 奖励的第二个对照任务，
+不要直接修改本任务以免失去实验基线。
+
+### 0~3 m/s 速度课程与 sim2sim 验收
+
+自然步态阶段稳定后使用 `CustomDog-Velocity-Speed-v1`。它仍保持 actor observation
+45 维、12 维位置动作；初始前向速度范围为 `0~0.75 m/s`，每个完整回合只有在速度
+跟踪奖励达到门槛时才增加 `0.25 m/s`，上限为 `3.0 m/s`。该任务增加了小范围质量、
+摩擦、PD 增益随机化，用于缩小 Isaac Sim、MuJoCo 和实机之间的差异。
+
+先从 Gait-v1 的稳定 checkpoint 正确恢复（`train.sh` 会转发参数，`--kit_args` 放在
+最末尾，不会吞掉 `--resume`）：
+
+```bash
+CUSTOM_DOG_TASK=CustomDog-Velocity-Speed-v1 \
+CUSTOM_DOG_NUM_ENVS=128 \
+CUSTOM_DOG_MAX_ITERATIONS=1500 \
+./scripts/train.sh --run_name speed_v1_curriculum \
+  --resume --load_run 2026-08-09_00-01-34 --checkpoint model_999.pt
+```
+
+需要继续巩固 `0~2 m/s` 后再扩速时，使用高速度续训任务：
+
+```bash
+CUSTOM_DOG_TASK=CustomDog-Velocity-SpeedHigh-v1 \
+CUSTOM_DOG_NUM_ENVS=128 \
+CUSTOM_DOG_MAX_ITERATIONS=1200 \
+./scripts/train.sh --run_name speed_high_v1 \
+  --resume --load_run <speed_v1_run> --checkpoint model_1499.pt
+```
+
+恢复测试必须在输出中看到 `Loading model checkpoint from:`、正确的 run 名和非 `1.0`
+的 `Mean action noise std`。否则说明 checkpoint 没有加载，禁止继续长训。
+
+导出并逐点验收：
+
+```bash
+CUSTOM_DOG_TASK=CustomDog-Velocity-SpeedHigh-v1 CUSTOM_DOG_PLAY_STEPS=2 \
+./scripts/play_export.sh logs/rsl_rl/custom_dog_velocity/<run>/model_XXXX.pt
+
+for vx in 0 0.25 0.5 1.0 1.5 2.0 2.5 3.0; do
+  ./scripts/run_sim2sim.sh \
+    --policy logs/rsl_rl/custom_dog_velocity/<run>/exported/policy.onnx \
+    --deploy-yaml logs/rsl_rl/custom_dog_velocity/<run>/params/deploy.yaml \
+    --command "$vx" 0 0 --duration 15 --warmup 3
+done
+```
+
+`run_sim2sim.py` 会输出机身坐标系的平均 `vx/vy`、速度绝对误差、偏航角速度、最小
+机身高度、最大倾角以及足端接触 duty/transitions。当前建议的实机候选门槛是：每个
+速度点不摔倒，`abs_error <= 0.3 m/s`，`max_tilt <= 15 deg`，`min_height >= 0.22 m`；
+任一点不满足就保留 checkpoint 做诊断，不部署到 Orin NX。
+
+2026-08-09 的实验记录：早期 `speed_v1` 和 `speed_high_v1` 分别停在 `2.0 m/s`。
+随后从正确恢复的 checkpoint 继续运行 `speed_full_v1_extend`，最终模型位于
+`logs/rsl_rl/custom_dog_velocity/2026-08-09_01-49-22_speed_full_v1_extend`。MuJoCo
+逐点测试 `0~3 m/s` 的速度误差为 `0.001~0.143 m/s`，最大倾角小于 `6 deg`，最小
+机身高度 `0.236 m`；`3.0 m/s` 延长到 30 秒仍未摔倒。当前策略通过了“前向速度和
+姿态”的 sim2sim 验收，但零偏航命令下平均偏航角速度约 `0.093 rad/s`，世界坐标
+轨迹会转弯；这需要在实机低速测试中继续校准 yaw/IMU 符号，不能直接按最高速部署。
+
 ## 5. 导出 ONNX
 
 假设选择的 checkpoint 是：

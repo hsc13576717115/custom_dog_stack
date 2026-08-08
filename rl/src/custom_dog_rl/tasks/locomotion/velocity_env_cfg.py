@@ -1,8 +1,14 @@
 """Custom-dog task derived from the working Go2 locomotion task."""
 
+from isaaclab.managers import CurriculumTermCfg as CurrTerm
+from isaaclab.managers import EventTermCfg as EventTerm
+from isaaclab.managers import RewardTermCfg as RewTerm
+from isaaclab.managers import SceneEntityCfg
 from isaaclab.utils import configclass
 
 from custom_dog_rl.assets.custom_dog import CUSTOM_DOG_CFG
+from custom_dog_rl.tasks.locomotion import mdp as custom_mdp
+from unitree_rl_lab.tasks.locomotion import mdp
 from unitree_rl_lab.tasks.locomotion.robots.go2.velocity_env_cfg import (
     RobotEnvCfg as Go2RobotEnvCfg,
 )
@@ -30,6 +36,190 @@ class RobotEnvCfg(Go2RobotEnvCfg):
 
 @configclass
 class RobotPlayEnvCfg(RobotEnvCfg):
+    def __post_init__(self):
+        super().__post_init__()
+        self.scene.num_envs = 32
+        self.scene.terrain.terrain_generator.num_rows = 2
+        self.scene.terrain.terrain_generator.num_cols = 1
+        self.commands.base_velocity.ranges = self.commands.base_velocity.limit_ranges
+
+
+@configclass
+class RobotGaitEnvCfg(RobotEnvCfg):
+    """Flat-ground stage for discovering a natural low-speed gait."""
+
+    def __post_init__(self):
+        super().__post_init__()
+
+        # Most environments receive a clear forward command. A small standing
+        # subset preserves the zero-command behavior without dominating PPO.
+        self.commands.base_velocity.rel_standing_envs = 0.05
+        self.commands.base_velocity.ranges.lin_vel_x = (0.2, 0.5)
+        self.commands.base_velocity.ranges.lin_vel_y = (-0.05, 0.05)
+        self.commands.base_velocity.ranges.ang_vel_z = (-0.15, 0.15)
+        self.commands.base_velocity.limit_ranges.lin_vel_x = (0.2, 0.5)
+        self.commands.base_velocity.limit_ranges.lin_vel_y = (-0.05, 0.05)
+        self.commands.base_velocity.limit_ranges.ang_vel_z = (-0.15, 0.15)
+
+        # Learn locomotion before robustness. Keep enough variation to avoid a
+        # single exact simulator, but remove disturbances that favor standing.
+        self.events.physics_material.params["static_friction_range"] = (0.7, 1.1)
+        self.events.physics_material.params["dynamic_friction_range"] = (0.7, 1.1)
+        self.events.physics_material.params["restitution_range"] = (0.0, 0.05)
+        self.events.add_base_mass.params["mass_distribution_params"] = (-0.3, 0.3)
+        self.events.reset_robot_joints.params["position_range"] = (0.95, 1.05)
+        self.events.reset_robot_joints.params["velocity_range"] = (-0.2, 0.2)
+        self.events.push_robot = None
+
+        # Make forward tracking worth moving for while retaining basic safety
+        # regularization. No explicit gait phase or feet_gait reward is used.
+        self.rewards.track_lin_vel_xy.weight = 2.0
+        self.rewards.track_lin_vel_xy.params["std"] = 0.5
+        self.rewards.track_ang_vel_z.weight = 0.5
+        self.rewards.alive = RewTerm(func=mdp.is_alive, weight=0.15)
+        self.rewards.termination_penalty = RewTerm(func=mdp.is_terminated, weight=-200.0)
+        self.rewards.flat_orientation_l2.weight = -2.0
+        self.rewards.joint_pos.weight = -0.2
+        self.rewards.action_rate.weight = -0.05
+        # The inherited air-time term is negative until a foot exceeds its
+        # threshold. Enable foot-style shaping only after locomotion emerges.
+        self.rewards.feet_air_time.weight = 0.0
+        self.rewards.feet_air_time.params["threshold"] = 0.3
+        self.rewards.air_time_variance.weight = 0.0
+        self.rewards.feet_slide.weight = -0.05
+
+        # This stage has a fixed command distribution and flat terrain. Command
+        # expansion and stronger domain randomization belong to the next stage.
+        self.curriculum.lin_vel_cmd_levels = None
+        self.curriculum.terrain_levels = None
+        if self.scene.terrain.terrain_generator is not None:
+            self.scene.terrain.terrain_generator.curriculum = False
+
+
+@configclass
+class RobotGaitPlayEnvCfg(RobotGaitEnvCfg):
+    def __post_init__(self):
+        super().__post_init__()
+        self.scene.num_envs = 32
+        self.scene.terrain.terrain_generator.num_rows = 2
+        self.scene.terrain.terrain_generator.num_cols = 1
+        self.commands.base_velocity.ranges = self.commands.base_velocity.limit_ranges
+
+
+@configclass
+class RobotSpeedEnvCfg(RobotGaitEnvCfg):
+    """Forward-speed curriculum that expands from standing to 3 m/s."""
+
+    def __post_init__(self):
+        super().__post_init__()
+
+        # Cover zero and low speeds continuously. The upper bound grows only
+        # after the current range reaches the tracking-reward threshold.
+        self.commands.base_velocity.rel_standing_envs = 0.1
+        self.commands.base_velocity.ranges.lin_vel_x = (0.0, 0.75)
+        self.commands.base_velocity.ranges.lin_vel_y = (-0.05, 0.05)
+        self.commands.base_velocity.ranges.ang_vel_z = (-0.15, 0.15)
+        self.commands.base_velocity.limit_ranges.lin_vel_x = (0.0, 3.0)
+        self.commands.base_velocity.limit_ranges.lin_vel_y = (-0.05, 0.05)
+        self.commands.base_velocity.limit_ranges.ang_vel_z = (-0.15, 0.15)
+
+        # Randomize the quantities that differ most across PhysX, MuJoCo and
+        # the real motor loop, while keeping this stage focused on flat ground.
+        self.events.physics_material.params["static_friction_range"] = (0.5, 1.2)
+        self.events.physics_material.params["dynamic_friction_range"] = (0.5, 1.2)
+        self.events.physics_material.params["restitution_range"] = (0.0, 0.08)
+        self.events.add_base_mass.params["mass_distribution_params"] = (-0.5, 0.5)
+        self.events.scale_body_mass = EventTerm(
+            func=mdp.randomize_rigid_body_mass,
+            mode="startup",
+            params={
+                "asset_cfg": SceneEntityCfg("robot", body_names=".*"),
+                "mass_distribution_params": (0.9, 1.1),
+                "operation": "scale",
+            },
+        )
+        self.events.randomize_actuator_gains = EventTerm(
+            func=mdp.randomize_actuator_gains,
+            mode="startup",
+            params={
+                "asset_cfg": SceneEntityCfg("robot", joint_names=".*"),
+                "stiffness_distribution_params": (0.8, 1.2),
+                "damping_distribution_params": (0.7, 1.5),
+                "operation": "scale",
+                "distribution": "log_uniform",
+            },
+        )
+        self.events.reset_robot_joints.params["position_range"] = (0.9, 1.1)
+        self.events.reset_robot_joints.params["velocity_range"] = (-0.5, 0.5)
+        self.events.push_robot = None
+
+        # Tighten velocity tracking after gait discovery, but retain enough
+        # freedom for stride length and frequency to increase with speed.
+        self.rewards.track_lin_vel_xy.weight = 3.0
+        self.rewards.track_lin_vel_xy.params["std"] = 0.35
+        self.rewards.track_ang_vel_z.weight = 0.75
+        self.rewards.flat_orientation_l2.weight = -3.0
+        self.rewards.joint_pos.weight = -0.1
+        self.rewards.action_rate.weight = -0.05
+        self.rewards.feet_air_time.weight = 0.1
+        self.rewards.feet_air_time.params["threshold"] = 0.25
+        self.rewards.air_time_variance.weight = -0.1
+        self.rewards.feet_slide.weight = -0.1
+
+        self.curriculum.lin_vel_cmd_levels = CurrTerm(
+            func=custom_mdp.forward_vel_cmd_levels,
+            params={"increment": 0.25, "success_threshold": 0.75},
+        )
+
+
+@configclass
+class RobotSpeedPlayEnvCfg(RobotSpeedEnvCfg):
+    def __post_init__(self):
+        super().__post_init__()
+        self.scene.num_envs = 32
+        self.scene.terrain.terrain_generator.num_rows = 2
+        self.scene.terrain.terrain_generator.num_cols = 1
+        self.commands.base_velocity.ranges = self.commands.base_velocity.limit_ranges
+
+
+@configclass
+class RobotSpeedHighEnvCfg(RobotSpeedEnvCfg):
+    """Continuation stage that consolidates 0-2 m/s before expanding to 3 m/s."""
+
+    def __post_init__(self):
+        super().__post_init__()
+        self.commands.base_velocity.ranges.lin_vel_x = (0.0, 2.0)
+        self.rewards.track_lin_vel_xy.weight = 4.0
+        self.rewards.track_lin_vel_xy.params["std"] = 0.25
+        self.rewards.track_ang_vel_z.weight = 1.0
+        self.curriculum.lin_vel_cmd_levels = CurrTerm(
+            func=custom_mdp.forward_vel_cmd_levels,
+            params={"increment": 0.25, "success_threshold": 0.7},
+        )
+
+
+@configclass
+class RobotSpeedHighPlayEnvCfg(RobotSpeedHighEnvCfg):
+    def __post_init__(self):
+        super().__post_init__()
+        self.scene.num_envs = 32
+        self.scene.terrain.terrain_generator.num_rows = 2
+        self.scene.terrain.terrain_generator.num_cols = 1
+        self.commands.base_velocity.ranges = self.commands.base_velocity.limit_ranges
+
+
+@configclass
+class RobotSpeedFullEnvCfg(RobotSpeedHighEnvCfg):
+    """Final fixed-distribution stage for continuous 0-3 m/s tracking."""
+
+    def __post_init__(self):
+        super().__post_init__()
+        self.commands.base_velocity.ranges.lin_vel_x = (0.0, 3.0)
+        self.curriculum.lin_vel_cmd_levels = None
+
+
+@configclass
+class RobotSpeedFullPlayEnvCfg(RobotSpeedFullEnvCfg):
     def __post_init__(self):
         super().__post_init__()
         self.scene.num_envs = 32
