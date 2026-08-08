@@ -22,6 +22,12 @@
 - `FixStand::enter()` 的插值起点必须读取 `lowstate->msg_.motor_state()[i].q()`，
   不能读取刚建立 DDS 时尚未初始化的 `lowcmd`。
 
+在 `/home/hsc/unitree_rl_lab/deploy/include/isaaclab/envs/mdp/actions/joint_actions.h`：
+
+- `JointAction::reset()` 必须把 `_processed_actions` 初始化为 YAML 中的 `offset`。
+  否则刚从 `FixStand` 进入 `Velocity` 时，策略线程完成第一次推理前会短暂发送全零
+  关节目标，造成自制模型的突然大幅运动。
+
 ## 重新构建
 
 ```bash

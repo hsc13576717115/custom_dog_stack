@@ -74,7 +74,8 @@ cd /home/hsc/custom_dog_stack
 
 官方二进制的启动补丁位于上游工作区 `/home/hsc/unitree_mujoco`，包括 home keyframe
 初始化、bridge 就绪前暂停物理步进和初始 home PD。`/home/hsc/unitree_rl_lab` 的
-`State_FixStand` 还需从实测 `lowstate` 开始插值。上游仓库不是本项目的子模块，换机
+`State_FixStand` 还需从实测 `lowstate` 开始插值，`JointAction::reset()` 还需先输出
+策略 offset。上游仓库不是本项目的子模块，换机
 时应按 `docs/unitree_mujoco_startup_patch.md` 应用并重新构建；不要把训练用
 `custom_dog.xml` 直接传给官方 binary。
 
