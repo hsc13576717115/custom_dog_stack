@@ -6,10 +6,15 @@ UNITREE_RL_LAB_ROOT="${UNITREE_RL_LAB_ROOT:-/home/hsc/unitree_rl_lab}"
 UNITREE_MUJOCO_ROOT="${UNITREE_MUJOCO_ROOT:-/home/hsc/unitree_mujoco}"
 CUSTOM_DOG_CONDA_ENV="${CUSTOM_DOG_CONDA_ENV:-env_isaaclab}"
 
+# NVIDIA Omniverse EULA was accepted for this workstation. Keep an explicit
+# override available for CI or a different machine.
+OMNI_KIT_ACCEPT_EULA="${OMNI_KIT_ACCEPT_EULA:-YES}"
+
 source /home/hsc/miniconda3/etc/profile.d/conda.sh
 conda activate "${CUSTOM_DOG_CONDA_ENV}"
 
 export CUSTOM_DOG_ROOT
+export OMNI_KIT_ACCEPT_EULA
 export ISAACLAB_ROOT
 export UNITREE_RL_LAB_ROOT
 export UNITREE_MUJOCO_ROOT
