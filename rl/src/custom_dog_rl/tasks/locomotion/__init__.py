@@ -13,3 +13,14 @@ gym.register(
         "rsl_rl_cfg_entry_point": "custom_dog_rl.agents.ppo_cfg:CustomDogPPORunnerCfg",
     },
 )
+
+gym.register(
+    id="CustomDog-Velocity-Robust-v0",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.velocity_env_cfg:RobotRobustEnvCfg",
+        "play_env_cfg_entry_point": f"{__name__}.velocity_env_cfg:RobotRobustPlayEnvCfg",
+        "rsl_rl_cfg_entry_point": "custom_dog_rl.agents.ppo_cfg:CustomDogPPORunnerCfg",
+    },
+)

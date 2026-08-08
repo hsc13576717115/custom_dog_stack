@@ -13,6 +13,10 @@ dependencies:
     repository: https://github.com/unitreerobotics/unitree_mujoco.git
     commit: ae6a8403e272733e9996ef59990880330496177f
     local_path: /home/hsc/unitree_mujoco
+  dog_control_reference:
+    repository: https://github.com/hsc13576717115/Dog-control.git
+    branch: qr_ws
+    commit: d4adbbafecd8e60fceb5f820d444090bf3a3e9d5
 
 runtime:
   operating_system: Ubuntu 22.04 under WSL 2

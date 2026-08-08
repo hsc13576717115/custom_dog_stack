@@ -1,0 +1,7 @@
+candidate: model_5498_robust
+training_run: 2026-08-08_21-31-25_robust_finetune
+checkpoint_iteration: 5498
+selection_reason: final checkpoint after 500-iteration reset-robustness fine-tune
+checkpoint_sha256: b20e29cea8f558ed3689098d5381806dffcb89f6adbfd5ab1427ea6bb9bc05f5
+onnx_sha256: 0e5bdf675cb20793e28526cd117c494cd495b0fad8e2f35c11f003f41cad7c79
+validated_for_hardware: false

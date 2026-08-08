@@ -12,7 +12,9 @@ sim2sim 和悬空测试把 ONNX 接到电机。
 - 电机：GO-M8010-6；hip/thigh 直接输出，calf 当前按额外 2:1 传动建模。
 - 策略接口：45 维 observation、12 维关节位置 action、50 Hz。
 - WSL 训练：CPU PhysX + RTX 4060 CUDA PPO。
-- 已验证：64 个并行环境、1 轮 PPO、ONNX 导出、ROS 2 Humble 四包编译。
+- 已验证：5000 轮基础训练、500 轮鲁棒微调、ONNX 导出、标准 MuJoCo 30 秒站立、
+  Unitree MuJoCo + SDK2 bridge 30 秒站立、ROS 2 Humble 四包编译。
+- 当前候选：`deploy/candidates/model_5498_robust`；已通过站立，尚未学会有效速度跟踪。
 - 未完成：真实 GOM-8010-6 RS485 协议、编码器零点、方向标定、急停链路和落地验收。
 
 Isaac Sim 在当前 WSL 中不能创建 Vulkan/RTX 设备，因此日志中可能出现
@@ -220,6 +222,22 @@ python rl/scripts/train.py \
 `model_N.pt` 就是 checkpoint。选择部署模型时，应根据 TensorBoard 和仿真表现选择，
 不要机械地认为最后一个 checkpoint 一定最好。
 
+当前用于解决 SDK2 接管姿态偏差的鲁棒微调命令为：
+
+```bash
+CUSTOM_DOG_TASK=CustomDog-Velocity-Robust-v0 \
+CUSTOM_DOG_NUM_ENVS=128 \
+CUSTOM_DOG_MAX_ITERATIONS=500 \
+./scripts/train_smoke.sh \
+  --run_name robust_finetune \
+  --resume \
+  --load_run 2026-08-08_15-57-41 \
+  --checkpoint model_4999.pt
+```
+
+该任务把训练速度限制为 `vx ±0.3`、`vy ±0.15`、`yaw ±0.5`，并加入初始姿态和
+关节偏差。结果见 [`docs/robust_finetune_report_2026-08-08.md`](docs/robust_finetune_report_2026-08-08.md)。
+
 ## 5. 导出 ONNX
 
 假设选择的 checkpoint 是：
@@ -233,6 +251,14 @@ logs/rsl_rl/custom_dog_velocity/2026-08-08_15-42-17/model_99.pt
 ```bash
 ./scripts/play_export.sh \
   logs/rsl_rl/custom_dog_velocity/2026-08-08_15-42-17/model_99.pt
+```
+
+鲁棒任务的 checkpoint 必须用同一个任务配置导出：
+
+```bash
+CUSTOM_DOG_TASK=CustomDog-Velocity-Robust-v0 \
+./scripts/play_export.sh \
+  logs/rsl_rl/custom_dog_velocity/2026-08-08_21-31-25_robust_finetune/model_5498.pt
 ```
 
 导出文件位于 checkpoint 同一个 run 的 `exported/` 目录：
@@ -282,6 +308,7 @@ target_position = default_joint_pos + 0.25 * policy_action
 ```
 
 当前策略是关节位置目标策略，不是直接力矩策略。Kp/Kd 在低层执行器控制中生效。
+当前候选固定使用关节侧 `Kp=25`、`Kd=0.5`，与 Isaac 训练执行器一致。
 
 `params/deploy.yaml` 中的 `joint_ids_map` 是动作和 SDK 电机编号的唯一权威映射，
 不能通过名称排序自行推断。每次 observation、action、关节顺序或缩放变化，都必须
@@ -393,7 +420,7 @@ sim2sim 失败时先修模型和接口，不要直接修改实机参数来掩盖
 自制模型准备了相同的 SDK2 数据格式。官方闭环命令为：
 
 ```bash
-./scripts/run_unitree_sim2sim.sh deploy/candidates/model_4999
+./scripts/run_unitree_sim2sim.sh deploy/candidates/model_5498_robust
 ```
 
 执行前需按 [`docs/unitree_mujoco_startup_patch.md`](docs/unitree_mujoco_startup_patch.md)
@@ -421,19 +448,18 @@ Isaac Lab 同域 playback（需要 Isaac Sim 能创建 Vulkan/RTX 图形设备�
 标准 MuJoCo policy playback（WSL 当前可用）：
 
 ```bash
-./scripts/view_mujoco_policy.sh deploy/candidates/model_4999 0.3 0.0 0.0
+./scripts/view_mujoco_policy.sh deploy/candidates/model_5498_robust 0.0 0.0 0.0
 ```
 
 官方 Unitree MuJoCo + SDK2 bridge playback：
 
 ```bash
-./scripts/run_unitree_sim2sim.sh deploy/candidates/model_4999
+./scripts/run_unitree_sim2sim.sh deploy/candidates/model_5498_robust
 ```
 
-本机实测标准 MuJoCo 30 秒的 `model_4999` 在 `0.3 m/s` 指令下只移动约 `0.0063 m`，
-没有形成正常步态；ONNX CPU 推理均值约 `0.152 ms`。官方 bridge 能连接并进入
-`Velocity`，随后因策略姿态异常回到 `Passive`。这两个结果说明接口和渲染路径正常，
-但当前策略还没有达到稳定行走效果。
+本机实测 `model_5498_robust` 在标准 MuJoCo 和官方 SDK2 bridge 中均能零速站立
+30 秒，两个控制器的 observation/action trace 逐项误差小于 `1e-5`。标准 MuJoCo
+`0.2 m/s` 指令下 30 秒只移动约 `0.009 m`，因此它是稳定站立候选，不是正常行走策略。
 
 当前 WSL 的 Isaac GUI 实测失败于 `No device could be created`、`Graphics plugins not
 available` 和 `nvidia-smi not found in /usr/bin`。PyTorch CUDA 和 CPU PhysX 训练不受
@@ -471,6 +497,18 @@ ros2 launch custom_dog_description display.launch.py
 当前 `custom_dog_hardware` 和 `custom_dog_controller` 是接口骨架，尚未完成真实
 GOM-8010-6 协议。`config/hardware.yaml` 中的端口、ID、方向和零点都是待标定值，
 `validated: false` 时禁止启动实机策略。
+
+`qr_ws` 驱动已经确认其上层 `Kp/Kd` 是关节侧参数，写入 GOM-8010-6 前按传动比
+平方换算。当前 RL 的固定值为：
+
+```text
+joint side: Kp=25, Kd=0.5
+hip/thigh motor side (6.33): Kp≈0.624, Kd≈0.0125
+calf motor side (12.66):    Kp≈0.156, Kd≈0.00312
+```
+
+这些电机侧数值必须由驱动计算，不应在策略层硬编码。`qr_ws` 小跑中更高且随相位变化
+的增益还配合 VMC 前馈力矩，不能直接替换本 RL 策略的固定 PD。
 
 ## 11. Orin NX Super 部署
 
@@ -581,3 +619,4 @@ CUSTOM_DOG_MAX_ITERATIONS=5000 \
 - [开发流程](docs/development_workflow.md)
 - [部署流程](docs/deployment.md)
 - [策略接口契约](docs/policy_contract.md)
+- [鲁棒微调与 sim2sim 报告](docs/robust_finetune_report_2026-08-08.md)

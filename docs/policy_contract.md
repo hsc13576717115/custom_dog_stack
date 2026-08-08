@@ -21,6 +21,12 @@ desired_joint_position = default_joint_position + 0.25 * policy_action
 
 最终命令还必须经过机械限位、速度限制和通信安全限制。
 
+## Position controller
+
+当前 v1 候选使用固定关节侧 `Kp=25`、`Kd=0.5`，目标速度和前馈力矩均为 0。
+训练、sim2sim 和实机 RL 状态必须一致。GOM-8010-6 SDK 使用电机侧增益时，由硬件
+驱动根据每个关节的总传动比做平方换算；该换算不属于 policy ONNX。
+
 ## Canonical SDK joint order
 
 ```text

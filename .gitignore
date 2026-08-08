@@ -20,6 +20,7 @@ outputs/
 *.pth
 *.ckpt
 events.out.tfevents.*
+artifacts/traces/
 
 # ROS 2 / colcon
 build/

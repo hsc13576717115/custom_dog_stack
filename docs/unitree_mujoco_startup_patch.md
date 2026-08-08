@@ -16,6 +16,10 @@
 
 - 若存在 `home` keyframe，把初始关节位置写入 `LowCmd`，并设置 `kp=25`、`kd=0.5`，
   直到外部控制器发布第一条命令。
+- bridge 线程读写 `mjData` 时使用 `sim->mtx`，避免 1 kHz SDK2 线程和 MuJoCo
+  物理线程并发访问同一组状态和控制量。
+- 设置 `UNITREE_MUJOCO_BRIDGE_TRACE=/path/bridge.csv` 时记录关节反馈、命令、增益和
+  力矩，最多 10000 行，用于定位交接冲击。
 
 在 `/home/hsc/unitree_rl_lab/deploy/include/FSM/State_FixStand.h`：
 
@@ -28,6 +32,28 @@
   否则刚从 `FixStand` 进入 `Velocity` 时，策略线程完成第一次推理前会短暂发送全零
   关节目标，造成自制模型的突然大幅运动。
 
+在 `/home/hsc/unitree_rl_lab/deploy/include/isaaclab/manager/action_manager.h` 和
+`deploy/include/FSM/State_RLBase.h`：
+
+- 为 action 的 reset、推理结果和 1 kHz 控制线程读取增加互斥保护，避免数据竞争。
+- 从 `FixStand` 进入 `Velocity` 时，以当前实测关节位置为起点，在
+  `transition_duration` 内平滑接管策略目标。
+- 设置 `UNITREE_RL_POLICY_TRACE=/path/policy.csv` 时，同一行记录 45 维 observation、
+  12 维原始 action、目标关节位置和实测状态。
+
+本项目的 `sim2sim/unitree_deploy/config.template.yaml` 使用：
+
+```yaml
+FSM:
+  FixStand:
+    ts: [0.0, 2.0]
+  Velocity:
+    transition_duration: 1.0
+```
+
+`0.2 s` 起身会造成很大的接触冲击；`2.0 s` 起身和 `1.0 s` 策略接管是当前自制模型
+通过官方 bridge 站立测试的一部分，不能在部署时省略。
+
 ## 重新构建
 
 ```bash
@@ -38,7 +64,7 @@ cmake --build /home/hsc/unitree_rl_lab/deploy/robots/go2/build -j4
 然后回到本仓库执行：
 
 ```bash
-./scripts/run_unitree_sim2sim.sh deploy/candidates/model_4999
+./scripts/run_unitree_sim2sim.sh deploy/candidates/model_5498_robust
 ```
 
 这些修改只解决启动时序和数据初始化，不会提高策略本身的 locomotion 能力；策略仍需

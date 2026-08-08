@@ -4,8 +4,10 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import time
 from pathlib import Path
+from typing import TextIO
 
 import mujoco
 import numpy as np
@@ -60,6 +62,8 @@ class PolicyController:
         policy_path: Path,
         deploy_path: Path,
         command: np.ndarray,
+        trace_path: Path | None = None,
+        trace_limit: int = 500,
     ) -> None:
         import onnxruntime as ort
 
@@ -130,6 +134,27 @@ class PolicyController:
         self.output_name = outputs[0].name
         self.previous_action = np.zeros(12, dtype=np.float64)
         self.inference_times_ms: list[float] = []
+        self.policy_steps = 0
+        self.trace_limit = trace_limit
+        self.trace_stream: TextIO | None = None
+        self.trace_writer: csv.writer | None = None
+        if trace_path is not None:
+            trace_path = trace_path.resolve()
+            trace_path.parent.mkdir(parents=True, exist_ok=True)
+            self.trace_stream = trace_path.open("w", encoding="utf-8", newline="")
+            self.trace_writer = csv.writer(self.trace_stream)
+            header = ["step", "time_s"]
+            for prefix, count in (
+                ("obs", 45),
+                ("action", 12),
+                ("target_q", 12),
+                ("joint_q", 12),
+                ("joint_dq", 12),
+                ("ang_vel", 3),
+                ("projected_gravity", 3),
+            ):
+                header.extend(f"{prefix}_{index}" for index in range(count))
+            self.trace_writer.writerow(header)
 
     def _scaled_term(self, name: str, values: np.ndarray) -> np.ndarray:
         term = self.cfg["observations"][name]
@@ -137,7 +162,8 @@ class PolicyController:
             raise ValueError(f"Only history_length=1 is supported, got {name}={term['history_length']}")
         scale = vector(term["scale"], len(values), f"{name} scale")
         lower, upper = term["clip"]
-        return np.clip(values * scale, lower, upper)
+        # Isaac Lab and unitree_rl_lab clip the raw observation before scale.
+        return np.clip(values, lower, upper) * scale
 
     def observation(self, model: mujoco.MjModel, data: mujoco.MjData) -> np.ndarray:
         angular_velocity = data.sensordata[self.gyro_address : self.gyro_address + 3].copy()
@@ -171,10 +197,42 @@ class PolicyController:
         if action.shape != (12,) or not np.isfinite(action).all():
             raise RuntimeError(f"Invalid policy action: shape={action.shape}")
 
-        action = np.clip(action, self.action_clip[:, 0], self.action_clip[:, 1])
-        target_policy_order = self.action_offset + self.action_scale * action
+        target_policy_order = np.clip(
+            self.action_offset + self.action_scale * action,
+            self.action_clip[:, 0],
+            self.action_clip[:, 1],
+        )
         data.ctrl[self.joint_map] = target_policy_order
         self.previous_action = action
+        self.policy_steps += 1
+
+        if self.trace_writer is not None and (
+            self.trace_limit == 0 or self.policy_steps <= self.trace_limit
+        ):
+            angular_velocity = data.sensordata[
+                self.gyro_address : self.gyro_address + 3
+            ].copy()
+            rotation_world_from_base = data.xmat[self.base_id].reshape(3, 3)
+            projected_gravity = rotation_world_from_base.T @ np.array([0.0, 0.0, -1.0])
+            row = [self.policy_steps, data.time]
+            for values in (
+                observation,
+                action,
+                target_policy_order,
+                data.qpos[self.qpos_addresses],
+                data.qvel[self.dof_addresses],
+                angular_velocity,
+                projected_gravity,
+            ):
+                row.extend(float(value) for value in values)
+            self.trace_writer.writerow(row)
+            self.trace_stream.flush()
+
+    def close(self) -> None:
+        if self.trace_stream is not None:
+            self.trace_stream.close()
+            self.trace_stream = None
+            self.trace_writer = None
 
 
 def parse_args() -> argparse.Namespace:
@@ -185,6 +243,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--deploy-yaml", type=Path, help="params/deploy.yaml from the same training run")
     parser.add_argument("--command", nargs=3, type=float, metavar=("VX", "VY", "YAW"), default=(0, 0, 0))
     parser.add_argument("--duration", type=float, default=10.0)
+    parser.add_argument("--trace", type=Path, help="Write policy observations and actions to CSV")
+    parser.add_argument(
+        "--trace-limit",
+        type=int,
+        default=500,
+        help="Maximum policy rows to trace; use 0 for unlimited (default: 500)",
+    )
     parser.add_argument("--viewer", action="store_true")
     parser.add_argument("--realtime", action="store_true", help="Pace headless simulation at wall-clock speed")
     args = parser.parse_args()
@@ -192,6 +257,8 @@ def parse_args() -> argparse.Namespace:
         parser.error("--policy and --deploy-yaml must be supplied together")
     if args.duration <= 0:
         parser.error("--duration must be positive")
+    if args.trace_limit < 0:
+        parser.error("--trace-limit must be non-negative")
     return args
 
 
@@ -216,6 +283,8 @@ def run(args: argparse.Namespace) -> None:
             args.policy,
             args.deploy_yaml,
             np.asarray(args.command, dtype=np.float64),
+            args.trace,
+            args.trace_limit,
         )
         mode = f"policy={args.policy}"
     else:
@@ -248,6 +317,8 @@ def run(args: argparse.Namespace) -> None:
     finally:
         if viewer_handle is not None:
             viewer_handle.close()
+        if controller is not None:
+            controller.close()
 
     elapsed = time.perf_counter() - started
     print(f"sim2sim OK: {mode}")

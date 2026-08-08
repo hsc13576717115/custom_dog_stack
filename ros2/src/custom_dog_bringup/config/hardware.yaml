@@ -2,6 +2,16 @@ schema_version: 1
 validated: false
 baud_rate: 4000000
 
+# RL uses a joint-side position target. Keep these values synchronized with
+# the Isaac actuator and the selected candidate's deploy.yaml.
+rl_position_control:
+  stiffness: 25.0
+  damping: 0.5
+  base_gear_ratio: 6.33
+  calf_total_gear_ratio: 12.66
+  # GO-M8010-6 SDK motor-side gains are joint-side gains / gear_ratio^2.
+  convert_gains_to_motor_side: true
+
 # One RS485 bus per leg. Device names, IDs, directions and zero offsets must be
 # measured on the actual Orin NX before this file is enabled.
 buses:

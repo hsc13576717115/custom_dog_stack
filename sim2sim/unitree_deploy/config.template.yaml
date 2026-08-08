@@ -18,11 +18,12 @@ FSM:
       Velocity: start.on_pressed
     kp: [25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25]
     kd: [0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5]
-    ts: [0, 0.2]
+    ts: [0, 2.0]
     qs:
       - []
       - [-0.1, 0.8, -1.5, 0.1, 0.8, -1.5, -0.1, 0.8, -1.5, 0.1, 0.8, -1.5]
   Velocity:
     transitions:
       Passive: LT + B.on_pressed
+    transition_duration: 1.0
     policy_dir: POLICY_DIR_IS_SET_BY_PREPARE_SCRIPT
