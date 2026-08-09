@@ -42,6 +42,21 @@ cd /home/hsc/custom_dog_stack
 ./scripts/run_sim2sim.sh --duration 30 --viewer
 ```
 
+## 键盘交互查看
+
+加载当前冻结候选并一直运行到关闭窗口：
+
+```bash
+./scripts/teleop_mujoco_policy.sh
+```
+
+窗口获得焦点后：`1`、`P` 或空格进入 Passive（零力矩）；`2` 或 `R` 从当前关节角在
+1 秒内插值到 home 站立位；`3` 或 `V` 启用 ONNX Velocity 模式。`W`/`S` 以每次
+`0.1 m/s` 调整前进速度，`A`/`D` 调整侧向速度，`Q`/`E` 调整偏航角速度，`X` 清零。
+当前直行候选的侧向和偏航训练范围为零，因此它们不会产生运动；该候选只应使用前进速度。
+
+这是 Python MuJoCo 的仿真调试入口，不会通过 ROS 2 或 RS485 下发任何实机指令。
+
 ## 加载 ONNX 策略
 
 `policy.onnx` 和 `deploy.yaml` 必须来自同一个训练 run 或同一个冻结候选：

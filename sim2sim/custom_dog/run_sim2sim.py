@@ -8,6 +8,7 @@ import csv
 import math
 import time
 from pathlib import Path
+from threading import Lock
 from typing import TextIO
 
 import mujoco
@@ -120,40 +121,20 @@ class PolicyController:
             if not np.isfinite(self.target_bias_policy).all():
                 raise ValueError("joint_target_bias.values must be finite")
 
-        self.command = vector(command, 3, "requested velocity command")
         ranges = self.cfg["commands"]["base_velocity"]["ranges"]
-        for value, key in zip(self.command, ("lin_vel_x", "lin_vel_y", "ang_vel_z")):
-            lower, upper = ranges[key]
-            if not lower <= value <= upper:
-                raise ValueError(f"Command {key}={value} is outside [{lower}, {upper}]")
-
-        # Optional deployment calibration maps the external speed request to
-        # the command placed in the policy observation.  Metrics continue to
-        # compare measured speed against the unmodified external request.
-        self.policy_command = self.command.copy()
-        calibration_root = self.cfg.get("command_calibration") or {}
-        if not isinstance(calibration_root, dict):
-            raise ValueError("command_calibration must be a mapping")
-        calibration_cfg = calibration_root.get("lin_vel_x")
-        if calibration_cfg is not None:
-            requested = np.asarray(calibration_cfg["requested"], dtype=np.float64)
-            policy = np.asarray(calibration_cfg["policy"], dtype=np.float64)
-            if (
-                requested.ndim != 1
-                or requested.size < 2
-                or policy.shape != requested.shape
-                or not np.isfinite(requested).all()
-                or not np.isfinite(policy).all()
-                or np.any(np.diff(requested) <= 0.0)
-                or np.any(np.diff(policy) < 0.0)
-            ):
-                raise ValueError("command_calibration.lin_vel_x must contain finite monotonic arrays")
-            lower, upper = ranges["lin_vel_x"]
-            if requested[0] > lower or requested[-1] < upper:
-                raise ValueError("command calibration must cover the exported lin_vel_x range")
-            if np.any(policy < lower) or np.any(policy > upper):
-                raise ValueError("calibrated policy commands must remain inside lin_vel_x range")
-            self.policy_command[0] = np.interp(self.command[0], requested, policy)
+        self.command_ranges = np.asarray(
+            [ranges["lin_vel_x"], ranges["lin_vel_y"], ranges["ang_vel_z"]],
+            dtype=np.float64,
+        )
+        if (
+            self.command_ranges.shape != (3, 2)
+            or not np.isfinite(self.command_ranges).all()
+            or np.any(self.command_ranges[:, 0] > self.command_ranges[:, 1])
+        ):
+            raise ValueError("Velocity command ranges must be finite lower/upper pairs")
+        self.command = np.zeros(3, dtype=np.float64)
+        self.policy_command = np.zeros(3, dtype=np.float64)
+        self.set_command(command)
 
         joint_ids = np.array(
             [
@@ -232,6 +213,50 @@ class PolicyController:
             1.0,
         )
         return blend * self.target_bias_policy
+
+    def set_command(self, command: np.ndarray) -> None:
+        """Set the external command and recalculate its policy calibration."""
+
+        requested_command = vector(command, 3, "requested velocity command")
+        names = ("lin_vel_x", "lin_vel_y", "ang_vel_z")
+        for index, name in enumerate(names):
+            lower, upper = self.command_ranges[index]
+            if not lower <= requested_command[index] <= upper:
+                raise ValueError(
+                    f"Command {name}={requested_command[index]} is outside [{lower}, {upper}]"
+                )
+
+        self.command = requested_command.copy()
+        self.policy_command = requested_command.copy()
+        calibration_root = self.cfg.get("command_calibration") or {}
+        if not isinstance(calibration_root, dict):
+            raise ValueError("command_calibration must be a mapping")
+        calibration_cfg = calibration_root.get("lin_vel_x")
+        if calibration_cfg is None:
+            return
+
+        requested = np.asarray(calibration_cfg["requested"], dtype=np.float64)
+        policy = np.asarray(calibration_cfg["policy"], dtype=np.float64)
+        if (
+            requested.ndim != 1
+            or requested.size < 2
+            or policy.shape != requested.shape
+            or not np.isfinite(requested).all()
+            or not np.isfinite(policy).all()
+            or np.any(np.diff(requested) <= 0.0)
+            or np.any(np.diff(policy) < 0.0)
+        ):
+            raise ValueError("command_calibration.lin_vel_x must contain finite monotonic arrays")
+        lower, upper = self.command_ranges[0]
+        if requested[0] > lower or requested[-1] < upper:
+            raise ValueError("command calibration must cover the exported lin_vel_x range")
+        if np.any(policy < lower) or np.any(policy > upper):
+            raise ValueError("calibrated policy commands must remain inside lin_vel_x range")
+        self.policy_command[0] = np.interp(self.command[0], requested, policy)
+
+    def reset_history(self) -> None:
+        self.previous_action.fill(0.0)
+
 
     def _scaled_term(self, name: str, values: np.ndarray) -> np.ndarray:
         term = self.cfg["observations"][name]
@@ -331,6 +356,76 @@ class PolicyController:
             self.trace_writer = None
 
 
+class InteractiveControls:
+    """Thread-safe keyboard state for the passive MuJoCo viewer."""
+
+    PASSIVE = "passive"
+    FIX_STAND = "fix_stand"
+    VELOCITY = "velocity"
+
+    def __init__(self, policy_controller: PolicyController | None) -> None:
+        self.policy_controller = policy_controller
+        self._mode = self.FIX_STAND
+        self._command = (
+            policy_controller.command.copy()
+            if policy_controller is not None
+            else np.zeros(3, dtype=np.float64)
+        )
+        self._revision = 0
+        self._lock = Lock()
+
+    def snapshot(self) -> tuple[str, np.ndarray, int]:
+        with self._lock:
+            return self._mode, self._command.copy(), self._revision
+
+    def _set_mode(self, mode: str) -> str:
+        self._mode = mode
+        self._revision += 1
+        return f"interactive mode={mode}, command={self._command.tolist()}"
+
+    def _change_command(self, index: int, delta: float) -> str:
+        if self.policy_controller is None:
+            return "Velocity commands require --policy and --deploy-yaml"
+        lower, upper = self.policy_controller.command_ranges[index]
+        previous = self._command[index]
+        self._command[index] = np.clip(previous + delta, lower, upper)
+        self._revision += 1
+        labels = ("vx", "vy", "yaw")
+        return f"interactive {labels[index]}={self._command[index]:.3f}"
+
+    def key_callback(self, key: int) -> None:
+        glfw = mujoco.glfw.glfw
+        message = None
+        with self._lock:
+            if key in (glfw.KEY_1, glfw.KEY_P, glfw.KEY_SPACE):
+                message = self._set_mode(self.PASSIVE)
+            elif key in (glfw.KEY_2, glfw.KEY_R):
+                message = self._set_mode(self.FIX_STAND)
+            elif key in (glfw.KEY_3, glfw.KEY_V):
+                if self.policy_controller is None:
+                    message = "Velocity mode requires --policy and --deploy-yaml"
+                else:
+                    message = self._set_mode(self.VELOCITY)
+            elif key == glfw.KEY_W:
+                message = self._change_command(0, 0.1)
+            elif key == glfw.KEY_S:
+                message = self._change_command(0, -0.1)
+            elif key == glfw.KEY_A:
+                message = self._change_command(1, 0.1)
+            elif key == glfw.KEY_D:
+                message = self._change_command(1, -0.1)
+            elif key == glfw.KEY_Q:
+                message = self._change_command(2, 0.1)
+            elif key == glfw.KEY_E:
+                message = self._change_command(2, -0.1)
+            elif key == glfw.KEY_X:
+                self._command.fill(0.0)
+                self._revision += 1
+                message = "interactive command reset to zero"
+        if message is not None:
+            print(message)
+
+
 def parse_args() -> argparse.Namespace:
     model_dir = Path(__file__).resolve().parent
     parser = argparse.ArgumentParser(description=__doc__)
@@ -348,13 +443,24 @@ def parse_args() -> argparse.Namespace:
         help="Maximum policy rows to trace; use 0 for unlimited (default: 500)",
     )
     parser.add_argument("--viewer", action="store_true")
+    parser.add_argument(
+        "--interactive",
+        action="store_true",
+        help="Enable keyboard Passive/FixStand/Velocity control in the MuJoCo viewer",
+    )
     parser.add_argument("--realtime", action="store_true", help="Pace headless simulation at wall-clock speed")
     args = parser.parse_args()
     if (args.policy is None) != (args.deploy_yaml is None):
         parser.error("--policy and --deploy-yaml must be supplied together")
-    if args.duration <= 0:
-        parser.error("--duration must be positive")
-    if args.warmup < 0 or args.warmup >= args.duration:
+    if args.duration < 0:
+        parser.error("--duration must be non-negative")
+    if args.duration == 0 and not args.interactive:
+        parser.error("--duration 0 is only valid with --interactive")
+    if args.interactive and not args.viewer:
+        parser.error("--interactive requires --viewer")
+    if args.interactive and args.trace is not None:
+        parser.error("--trace is only supported for fixed-command runs")
+    if args.warmup < 0 or (args.duration > 0 and args.warmup >= args.duration):
         parser.error("--warmup must be non-negative and shorter than --duration")
     if args.trace_limit < 0:
         parser.error("--trace-limit must be non-negative")
@@ -385,17 +491,28 @@ def run(args: argparse.Namespace) -> None:
             args.trace,
             args.trace_limit,
         )
-        mode = f"policy={args.policy}"
+        run_mode = f"policy={args.policy}"
     else:
-        mode = "position hold"
+        run_mode = "position hold"
 
-    total_steps = int(np.ceil(args.duration / model.opt.timestep))
+    total_steps = None if args.duration == 0 else int(np.ceil(args.duration / model.opt.timestep))
     started = time.perf_counter()
     viewer_handle = None
+    interactive_controls = InteractiveControls(controller) if args.interactive else None
     if args.viewer:
         from mujoco import viewer
 
-        viewer_handle = viewer.launch_passive(model, data)
+        viewer_handle = viewer.launch_passive(
+            model,
+            data,
+            key_callback=interactive_controls.key_callback if interactive_controls is not None else None,
+        )
+
+    if interactive_controls is not None:
+        print(
+            "interactive keys: 1/P/Space=Passive, 2/R=FixStand, 3/V=Velocity, "
+            "W/S=vx, A/D=vy, Q/E=yaw, X=zero"
+        )
 
     metric_start_pos = None
     metric_start_time = None
@@ -411,14 +528,61 @@ def run(args: argparse.Namespace) -> None:
         raise ValueError("MJCF must contain all four foot bodies")
     contact_samples: list[np.ndarray] = []
 
+    sdk_joint_ids = np.asarray(
+        [mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, name) for name in SDK_JOINT_ORDER],
+        dtype=np.int32,
+    )
+    sdk_qpos_addresses = model.jnt_qposadr[sdk_joint_ids]
+    nominal_forcerange = model.actuator_forcerange.copy()
+    nominal_forcelimited = model.actuator_forcelimited.copy()
+    last_interactive_mode = None
+    last_command_revision = -1
+    stand_start_positions = HOME_SDK.copy()
+    stand_start_time = 0.0
+    collect_metrics = interactive_controls is None
+    step = 0
+
     try:
-        for step in range(total_steps):
+        while total_steps is None or step < total_steps:
             if viewer_handle is not None and not viewer_handle.is_running():
                 break
-            if controller is not None and step % controller.decimation == 0:
-                controller.update(model, data)
-            if controller is not None:
-                controller.apply_actuator_limits(model, data)
+            if interactive_controls is None:
+                if controller is not None and step % controller.decimation == 0:
+                    controller.update(model, data)
+                if controller is not None:
+                    controller.apply_actuator_limits(model, data)
+            else:
+                interactive_mode, command, revision = interactive_controls.snapshot()
+                if interactive_mode != last_interactive_mode:
+                    if interactive_mode == InteractiveControls.FIX_STAND:
+                        stand_start_positions = data.qpos[sdk_qpos_addresses].copy()
+                        stand_start_time = data.time
+                    elif interactive_mode == InteractiveControls.VELOCITY and controller is not None:
+                        controller.reset_history()
+                        last_command_revision = -1
+                    last_interactive_mode = interactive_mode
+
+                if interactive_mode == InteractiveControls.PASSIVE:
+                    model.actuator_forcelimited[:] = 1
+                    model.actuator_forcerange[:] = 0.0
+                elif interactive_mode == InteractiveControls.FIX_STAND:
+                    model.actuator_forcelimited[:] = nominal_forcelimited
+                    model.actuator_forcerange[:] = nominal_forcerange
+                    blend = min(1.0, max(0.0, (data.time - stand_start_time) / 1.0))
+                    data.ctrl[:] = (1.0 - blend) * stand_start_positions + blend * HOME_SDK
+                    if controller is not None:
+                        controller.apply_actuator_limits(model, data)
+                elif interactive_mode == InteractiveControls.VELOCITY:
+                    if controller is None:
+                        raise RuntimeError("Velocity mode requires a policy controller")
+                    if revision != last_command_revision:
+                        controller.set_command(command)
+                        last_command_revision = revision
+                    if step % controller.decimation == 0:
+                        controller.update(model, data)
+                    controller.apply_actuator_limits(model, data)
+                else:
+                    raise RuntimeError(f"Unknown interactive mode: {interactive_mode}")
             mujoco.mj_step(model, data)
             if not np.isfinite(data.qpos).all() or not np.isfinite(data.qvel).all():
                 raise RuntimeError(f"Simulation became non-finite at step {step}")
@@ -429,7 +593,7 @@ def run(args: argparse.Namespace) -> None:
                 delay = target_time - time.perf_counter()
                 if delay > 0:
                     time.sleep(delay)
-            if data.time >= args.warmup:
+            if collect_metrics and data.time >= args.warmup:
                 if metric_start_pos is None:
                     metric_start_pos = data.qpos[:3].copy()
                     metric_start_time = float(data.time)
@@ -446,6 +610,7 @@ def run(args: argparse.Namespace) -> None:
                     body_ids = (model.geom_bodyid[contact.geom1], model.geom_bodyid[contact.geom2])
                     foot_contacts |= np.isin(foot_body_ids, body_ids)
                 contact_samples.append(foot_contacts)
+            step += 1
     finally:
         if viewer_handle is not None:
             viewer_handle.close()
@@ -453,7 +618,7 @@ def run(args: argparse.Namespace) -> None:
             controller.close()
 
     elapsed = time.perf_counter() - started
-    print(f"sim2sim OK: {mode}")
+    print(f"sim2sim OK: {run_mode}")
     print(f"simulated={data.time:.3f} s, wall={elapsed:.3f} s, real-time-factor={data.time / elapsed:.2f}")
     print(f"base position=[{data.qpos[0]:.4f}, {data.qpos[1]:.4f}, {data.qpos[2]:.4f}]")
     if controller is not None and metric_start_pos is not None and metric_start_time is not None:
@@ -484,6 +649,8 @@ def run(args: argparse.Namespace) -> None:
                 ", ".join(str(int(value)) for value in transitions),
             )
         )
+    elif interactive_controls is not None:
+        print("interactive session ended; tracking metrics are omitted because commands changed during the run")
     if controller is not None and controller.inference_times_ms:
         samples = np.asarray(controller.inference_times_ms)
         print(
