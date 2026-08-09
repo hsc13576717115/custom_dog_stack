@@ -393,7 +393,7 @@
     <parent link="FR_thigh" />
     <child link="FR_calf" />
     <axis xyz="0 0.999988368876 -0.00482308130063" />
-    <limit lower="-2.7227" upper="-0.83776" effort="45" velocity="15" />
+    <limit lower="-2.8274333882" upper="-0.83775804096" effort="45" velocity="15" />
   </joint>
   <joint name="FR_foot_joint" type="fixed">
     <origin xyz="0 0 -0.207645932301958" rpy="0 0 0" />
@@ -419,7 +419,7 @@
     <parent link="FL_thigh" />
     <child link="FL_calf" />
     <axis xyz="0 0.99999192766 0.00401803621624" />
-    <limit lower="-2.7227" upper="-0.83776" effort="45" velocity="15" />
+    <limit lower="-2.8274333882" upper="-0.83775804096" effort="45" velocity="15" />
   </joint>
   <joint name="FL_foot_joint" type="fixed">
     <origin xyz="0 0 -0.207579751226609" rpy="0 0 0" />
@@ -445,7 +445,7 @@
     <parent link="RR_thigh" />
     <child link="RR_calf" />
     <axis xyz="0 0.999992582234 -0.00385168500319" />
-    <limit lower="-2.7227" upper="-0.83776" effort="45" velocity="15" />
+    <limit lower="-2.8274333882" upper="-0.83775804096" effort="45" velocity="15" />
   </joint>
   <joint name="RR_foot_joint" type="fixed">
     <origin xyz="0 0 -0.207539297095126" rpy="0 0 0" />
@@ -471,7 +471,7 @@
     <parent link="RL_thigh" />
     <child link="RL_calf" />
     <axis xyz="-1.66792792312e-05 0.999988977097 0.00469525351064" />
-    <limit lower="-2.7227" upper="-0.83776" effort="45" velocity="15" />
+    <limit lower="-2.8274333882" upper="-0.83775804096" effort="45" velocity="15" />
   </joint>
   <joint name="RL_foot_joint" type="fixed">
     <origin xyz="0 0 -0.207097655168717" rpy="0 0 0" />

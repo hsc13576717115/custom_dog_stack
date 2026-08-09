@@ -8,6 +8,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DESCRIPTION_DIR = PROJECT_ROOT / "ros2" / "src" / "custom_dog_description"
 URDF_PATH = DESCRIPTION_DIR / "urdf" / "custom_dog.urdf"
 LEGS = ("FR", "FL", "RR", "RL")
+CALF_LOWER_LIMIT_RAD = math.radians(-162.0)
+CALF_UPPER_LIMIT_RAD = math.radians(-48.0)
 
 
 class UrdfContractTest(unittest.TestCase):
@@ -84,6 +86,18 @@ class UrdfContractTest(unittest.TestCase):
             axis = [float(value) for value in joint.find("axis").attrib["xyz"].split()]
             self.assertTrue(math.isclose(math.sqrt(sum(value * value for value in axis)), 1.0, abs_tol=1e-6), name)
         self.assertEqual(revolute_count, 12)
+
+    def test_calf_limits_match_the_measured_folded_pose(self):
+        for leg in LEGS:
+            limit = self.joints[f"{leg}_calf_joint"].find("limit").attrib
+            self.assertTrue(
+                math.isclose(float(limit["lower"]), CALF_LOWER_LIMIT_RAD, abs_tol=1e-6),
+                leg,
+            )
+            self.assertTrue(
+                math.isclose(float(limit["upper"]), CALF_UPPER_LIMIT_RAD, abs_tol=1e-6),
+                leg,
+            )
 
 
 if __name__ == "__main__":

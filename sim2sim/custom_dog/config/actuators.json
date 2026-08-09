@@ -1,14 +1,14 @@
 {
   "FR_hip_joint": {"actuator_type": "position", "kp": 25.0, "kv": 0.5, "ctrlrange": [-1.0471975512, 1.0471975512], "forcerange": [-23.4, 23.4]},
   "FR_thigh_joint": {"actuator_type": "position", "kp": 25.0, "kv": 0.5, "ctrlrange": [-1.5707963268, 3.4906585040], "forcerange": [-23.4, 23.4]},
-  "FR_calf_joint": {"actuator_type": "position", "kp": 25.0, "kv": 0.5, "ctrlrange": [-2.7227136331, -0.8377580410], "forcerange": [-46.8, 46.8]},
+  "FR_calf_joint": {"actuator_type": "position", "kp": 25.0, "kv": 0.5, "ctrlrange": [-2.8274333882, -0.8377580410], "forcerange": [-46.8, 46.8]},
   "FL_hip_joint": {"actuator_type": "position", "kp": 25.0, "kv": 0.5, "ctrlrange": [-1.0471975512, 1.0471975512], "forcerange": [-23.4, 23.4]},
   "FL_thigh_joint": {"actuator_type": "position", "kp": 25.0, "kv": 0.5, "ctrlrange": [-1.5707963268, 3.4906585040], "forcerange": [-23.4, 23.4]},
-  "FL_calf_joint": {"actuator_type": "position", "kp": 25.0, "kv": 0.5, "ctrlrange": [-2.7227136331, -0.8377580410], "forcerange": [-46.8, 46.8]},
+  "FL_calf_joint": {"actuator_type": "position", "kp": 25.0, "kv": 0.5, "ctrlrange": [-2.8274333882, -0.8377580410], "forcerange": [-46.8, 46.8]},
   "RR_hip_joint": {"actuator_type": "position", "kp": 25.0, "kv": 0.5, "ctrlrange": [-1.0471975512, 1.0471975512], "forcerange": [-23.4, 23.4]},
   "RR_thigh_joint": {"actuator_type": "position", "kp": 25.0, "kv": 0.5, "ctrlrange": [-1.5707963268, 3.4906585040], "forcerange": [-23.4, 23.4]},
-  "RR_calf_joint": {"actuator_type": "position", "kp": 25.0, "kv": 0.5, "ctrlrange": [-2.7227136331, -0.8377580410], "forcerange": [-46.8, 46.8]},
+  "RR_calf_joint": {"actuator_type": "position", "kp": 25.0, "kv": 0.5, "ctrlrange": [-2.8274333882, -0.8377580410], "forcerange": [-46.8, 46.8]},
   "RL_hip_joint": {"actuator_type": "position", "kp": 25.0, "kv": 0.5, "ctrlrange": [-1.0471975512, 1.0471975512], "forcerange": [-23.4, 23.4]},
   "RL_thigh_joint": {"actuator_type": "position", "kp": 25.0, "kv": 0.5, "ctrlrange": [-1.5707963268, 3.4906585040], "forcerange": [-23.4, 23.4]},
-  "RL_calf_joint": {"actuator_type": "position", "kp": 25.0, "kv": 0.5, "ctrlrange": [-2.7227136331, -0.8377580410], "forcerange": [-46.8, 46.8]}
+  "RL_calf_joint": {"actuator_type": "position", "kp": 25.0, "kv": 0.5, "ctrlrange": [-2.8274333882, -0.8377580410], "forcerange": [-46.8, 46.8]}
 }
