@@ -1,0 +1,11 @@
+candidate: model_4500_yaw_straight
+training_run: 2026-08-09_02-26-29_yaw_straight_finetune
+checkpoint_iteration: 4500
+selection_reason: earliest stable yaw-correction checkpoint; later checkpoints regressed in sim2sim
+policy_contract_version: "1.2"
+checkpoint_sha256: f9cab3acbea0d18f8d92a2e126d1b5fef0e6fa36b5b9f6f3c0b7dd286b4bffde
+onnx_sha256: 3a66963e830d74b4cdc3e37b86f466d4f3d7dc9c3b948056cba92d7a36cab46a
+deploy_yaml_sha256: 9bd12f2c8feee83f91949fe25c58d04d92ee46df6fb7e9b8e7295724f04c6639
+sim2sim_target_bias_calibrated: true
+sim2sim_velocity_command_calibrated: true
+validated_for_hardware: false

@@ -31,10 +31,44 @@ def observation_term(values: np.ndarray, cfg: dict[str, object]) -> np.ndarray:
     return np.clip(values, lower, upper) * scale
 
 
+def policy_command(raw_command: np.ndarray, cfg: dict[str, object]) -> np.ndarray:
+    """Apply the optional deploy-time command calibration to raw requests."""
+
+    result = raw_command.copy()
+    calibration_root = cfg.get("command_calibration") or {}
+    if not isinstance(calibration_root, dict):
+        raise ValueError("command_calibration must be a mapping")
+    calibration = calibration_root.get("lin_vel_x")
+    if calibration is None:
+        return result
+    requested = np.asarray(calibration["requested"], dtype=np.float64)
+    policy = np.asarray(calibration["policy"], dtype=np.float64)
+    if (
+        requested.ndim != 1
+        or requested.size < 2
+        or policy.shape != requested.shape
+        or not np.isfinite(requested).all()
+        or not np.isfinite(policy).all()
+        or np.any(np.diff(requested) <= 0.0)
+        or np.any(np.diff(policy) < 0.0)
+    ):
+        raise ValueError("Invalid command_calibration.lin_vel_x configuration")
+    result[:, 0] = np.interp(result[:, 0], requested, policy)
+    return result
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("trace", type=Path)
     parser.add_argument("candidate", type=Path, help="Directory containing exported/ and params/")
+    parser.add_argument(
+        "--expected-command",
+        nargs=3,
+        type=float,
+        metavar=("VX", "VY", "YAW"),
+        required=True,
+        help="Independent raw velocity command expected in every trace row",
+    )
     parser.add_argument("--tolerance", type=float, default=1e-5)
     args = parser.parse_args()
 
@@ -58,10 +92,14 @@ def main() -> None:
 
     obs_cfg = cfg["observations"]
     default_q = np.asarray(cfg["default_joint_pos"], dtype=np.float64)
+    raw_command = np.broadcast_to(np.asarray(args.expected_command), (len(rows), 3))
+    calibrated_command = policy_command(raw_command, cfg)
     expected_terms = {
         "base_ang_vel": observation_term(ang_vel, obs_cfg["base_ang_vel"]),
         "projected_gravity": observation_term(gravity, obs_cfg["projected_gravity"]),
-        "velocity_commands": obs[:, 6:9],
+        "velocity_commands": observation_term(
+            calibrated_command, obs_cfg["velocity_commands"]
+        ),
         "joint_pos_rel": observation_term(
             joint_q - default_q, obs_cfg["joint_pos_rel"]
         ),
@@ -88,6 +126,20 @@ def main() -> None:
     )
     clip = np.asarray(action_cfg["clip"])
     expected_target = np.clip(expected_target, clip[:, 0], clip[:, 1])
+
+    bias_cfg = cfg.get("joint_target_bias")
+    if bias_cfg is not None:
+        bias = np.asarray(bias_cfg["values"], dtype=np.float64)
+        vx_min, vx_max = np.asarray(bias_cfg["vx_range"], dtype=np.float64)
+        if (
+            bias.shape != (12,)
+            or not np.isfinite(bias).all()
+            or not np.isfinite([vx_min, vx_max]).all()
+            or vx_max <= vx_min
+        ):
+            raise ValueError("Invalid joint_target_bias configuration")
+        blend = np.clip((raw_command[:, 0] - vx_min) / (vx_max - vx_min), 0.0, 1.0)
+        expected_target += blend[:, np.newaxis] * bias
 
     try:
         import onnxruntime as ort

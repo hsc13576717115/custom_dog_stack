@@ -35,10 +35,12 @@ metadata.yaml
 sha256sums.txt
 ```
 
-ROS 2 节点按以下顺序工作：RS485 驱动读取 12 个电机状态 -> 按
-`docs/policy_contract.md` 构造 45 维 observation -> ONNX 推理 -> 将 12 维 action
-转换为目标关节位置 -> 叠加默认姿态并限幅 -> 通过四路 RS485 发送。启动前必须完成
-电机 ID、方向、编码器零点、限位、Kp/Kd、端口和急停配置。
+ROS 2 节点按以下顺序工作：RS485 驱动读取 12 个电机状态 -> 将外部速度请求按候选
+`command_calibration` 映射为 policy command -> 按 `docs/policy_contract.md` 构造 45 维
+observation -> ONNX 推理 -> `offset + scale * action` -> 训练导出的 action clip ->
+候选声明的可选目标 bias -> 机械、速度和通信安全限位 -> 通过四路 RS485 发送。原始
+ONNX action 单独保存为下一帧 `last_action`。启动前必须完成电机 ID、方向、编码器零点、
+限位、Kp/Kd、端口和急停配置。
 
 当前 RL 候选使用固定的关节侧 `Kp=25`、`Kd=0.5`。GOM-8010-6 驱动按照
 `Dog-control/qr_ws` 已采用的关节侧接口，在 SDK 边界做：
@@ -55,9 +57,12 @@ hip/thigh 的传动比为 `6.33` 时，电机侧约为 `0.624/0.0125`；calf 总
 实机开放顺序固定为：单电机无负载、单腿悬空、四腿悬空、低增益站立、安全绳落地、
 低速策略。任何通信超时、过温、越限、急停或 observation 异常都必须进入零输出/阻尼状态。
 
-当前 `model_5498_robust` 只通过两套 MuJoCo 的零速 30 秒站立，尚未通过速度跟踪，
-因此不能进入落地行走测试。详细结果见
-[鲁棒微调与 sim2sim 报告](robust_finetune_report_2026-08-08.md)。
+当前行走候选是 `model_4500_yaw_straight`。它已经通过带候选 YAML（低速 command
+calibration 和高速 target bias）校准的 Python
+MuJoCo `0~3 m/s` 验收，详细结果见
+[0~3 m/s 速度与偏航 sim2sim 报告](speed_straight_report_2026-08-09.md)。但 Unitree
+C++ 和 ROS 2 controller 还没有实现 `command_calibration`/`joint_target_bias`，RS485 硬件驱动也只是接口骨架；
+所以 `validated_for_hardware` 仍为 `false`，不能进入落地行走测试。
 
 ## Orin NX 与香橙派 5 Plus
 

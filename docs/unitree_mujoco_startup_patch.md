@@ -54,6 +54,27 @@ FSM:
 `0.2 s` 起身会造成很大的接触冲击；`2.0 s` 起身和 `1.0 s` 策略接管是当前自制模型
 通过官方 bridge 站立测试的一部分，不能在部署时省略。
 
+## `model_4500_yaw_straight` 的动作校准
+
+该候选的 `params/deploy.yaml` 在顶层声明 `command_calibration` 和
+`joint_target_bias`。本仓库 Python MuJoCo 控制器已按 [`policy_contract.md`](policy_contract.md)
+应用它们，但当前上游 `unitree_rl_lab` 的 `JointAction` 只处理 `scale`、`offset` 和
+`clip`，会忽略这些字段。
+
+移植到 Unitree C++ 或 Orin ROS 2 时必须保持以下顺序：先保存外部 requested command，
+按 calibration 得到 policy command 并写入 observation；ONNX 原始 action 先保存为
+`last_action`，再计算 `offset + scale * action`，执行导出的 action clip，最后按外部
+requested `vx` 加入 bias，并通过 `joint_ids_map` 下发。不能把加过 bias 的目标位置回填
+到 observation。真实机器人上的 bias 需要从 0 开始重新标定，不能直接假设 MuJoCo 的
+`+/-0.02 rad` 等于实机最优值。
+
+在 C++ 路径实现并重建之前，下面的候选命令只验证 DDS、MJCF、ONNX 和零速接口闭环，
+不构成 0~3 m/s 行走验收：
+
+```bash
+./scripts/run_unitree_sim2sim.sh deploy/candidates/model_4500_yaw_straight
+```
+
 ## 重新构建
 
 ```bash
@@ -64,7 +85,7 @@ cmake --build /home/hsc/unitree_rl_lab/deploy/robots/go2/build -j4
 然后回到本仓库执行：
 
 ```bash
-./scripts/run_unitree_sim2sim.sh deploy/candidates/model_5498_robust
+./scripts/run_unitree_sim2sim.sh deploy/candidates/model_4500_yaw_straight
 ```
 
 这些修改只解决启动时序和数据初始化，不会提高策略本身的 locomotion 能力；策略仍需

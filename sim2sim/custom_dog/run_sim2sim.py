@@ -102,12 +102,58 @@ class PolicyController:
         if self.action_clip.shape != (12, 2):
             raise ValueError(f"Action clip must have shape (12, 2), got {self.action_clip.shape}")
 
-        self.command = vector(command, 3, "velocity command")
+        # Optional sim2sim calibration, expressed in policy joint order.  The
+        # bias is applied after inference so the raw action remains the value
+        # fed back through the 45-D last_action observation.
+        bias_cfg = self.cfg.get("joint_target_bias")
+        self.target_bias_policy = np.zeros(12, dtype=np.float64)
+        self.bias_vx_min = 0.0
+        self.bias_vx_max = 0.0
+        if bias_cfg is not None:
+            self.target_bias_policy = vector(
+                bias_cfg["values"], 12, "joint_target_bias.values"
+            )
+            vx_range = vector(bias_cfg["vx_range"], 2, "joint_target_bias.vx_range")
+            self.bias_vx_min, self.bias_vx_max = (float(vx_range[0]), float(vx_range[1]))
+            if not np.isfinite(vx_range).all() or self.bias_vx_max <= self.bias_vx_min:
+                raise ValueError("joint_target_bias.vx_range must be strictly increasing")
+            if not np.isfinite(self.target_bias_policy).all():
+                raise ValueError("joint_target_bias.values must be finite")
+
+        self.command = vector(command, 3, "requested velocity command")
         ranges = self.cfg["commands"]["base_velocity"]["ranges"]
         for value, key in zip(self.command, ("lin_vel_x", "lin_vel_y", "ang_vel_z")):
             lower, upper = ranges[key]
             if not lower <= value <= upper:
                 raise ValueError(f"Command {key}={value} is outside [{lower}, {upper}]")
+
+        # Optional deployment calibration maps the external speed request to
+        # the command placed in the policy observation.  Metrics continue to
+        # compare measured speed against the unmodified external request.
+        self.policy_command = self.command.copy()
+        calibration_root = self.cfg.get("command_calibration") or {}
+        if not isinstance(calibration_root, dict):
+            raise ValueError("command_calibration must be a mapping")
+        calibration_cfg = calibration_root.get("lin_vel_x")
+        if calibration_cfg is not None:
+            requested = np.asarray(calibration_cfg["requested"], dtype=np.float64)
+            policy = np.asarray(calibration_cfg["policy"], dtype=np.float64)
+            if (
+                requested.ndim != 1
+                or requested.size < 2
+                or policy.shape != requested.shape
+                or not np.isfinite(requested).all()
+                or not np.isfinite(policy).all()
+                or np.any(np.diff(requested) <= 0.0)
+                or np.any(np.diff(policy) < 0.0)
+            ):
+                raise ValueError("command_calibration.lin_vel_x must contain finite monotonic arrays")
+            lower, upper = ranges["lin_vel_x"]
+            if requested[0] > lower or requested[-1] < upper:
+                raise ValueError("command calibration must cover the exported lin_vel_x range")
+            if np.any(policy < lower) or np.any(policy > upper):
+                raise ValueError("calibrated policy commands must remain inside lin_vel_x range")
+            self.policy_command[0] = np.interp(self.command[0], requested, policy)
 
         joint_ids = np.array(
             [
@@ -175,6 +221,18 @@ class PolicyController:
                 header.extend(f"{prefix}_{index}" for index in range(count))
             self.trace_writer.writerow(header)
 
+    def target_bias(self) -> np.ndarray:
+        """Return the forward-command-dependent target calibration."""
+        if self.bias_vx_max <= self.bias_vx_min:
+            return np.zeros(12, dtype=np.float64)
+        blend = np.clip(
+            (float(self.command[0]) - self.bias_vx_min)
+            / (self.bias_vx_max - self.bias_vx_min),
+            0.0,
+            1.0,
+        )
+        return blend * self.target_bias_policy
+
     def _scaled_term(self, name: str, values: np.ndarray) -> np.ndarray:
         term = self.cfg["observations"][name]
         if int(term["history_length"]) != 1:
@@ -194,7 +252,7 @@ class PolicyController:
         raw_terms = {
             "base_ang_vel": angular_velocity,
             "projected_gravity": projected_gravity,
-            "velocity_commands": self.command,
+            "velocity_commands": self.policy_command,
             "joint_pos_rel": joint_position - self.default_position,
             "joint_vel_rel": joint_velocity,
             "last_action": self.previous_action,
@@ -221,6 +279,7 @@ class PolicyController:
             self.action_clip[:, 0],
             self.action_clip[:, 1],
         )
+        target_policy_order += self.target_bias()
         data.ctrl[self.joint_map] = target_policy_order
         self.previous_action = action
         self.policy_steps += 1
@@ -409,6 +468,7 @@ def run(args: argparse.Namespace) -> None:
         duty_factors = contacts.mean(axis=0)
         print(
             f"tracking: command_vx={controller.command[0]:.3f} m/s, "
+            f"policy_vx={controller.policy_command[0]:.3f} m/s, "
             f"mean_vx={forward_speed:.3f} m/s, abs_error={speed_error:.3f} m/s, "
             f"mean_vy={lateral_speed:.3f} m/s, mean_yaw_rate={np.mean(body_yaw_rates):.3f} rad/s"
         )

@@ -12,9 +12,13 @@ sim2sim 和悬空测试把 ONNX 接到电机。
 - 电机：GO-M8010-6；hip/thigh 直接输出，calf 当前按额外 2:1 传动建模。
 - 策略接口：45 维 observation、12 维关节位置 action、50 Hz。
 - WSL 训练：CPU PhysX + RTX 4060 CUDA PPO。
-- 已验证：5000 轮基础训练、500 轮鲁棒微调、ONNX 导出、标准 MuJoCo 30 秒站立、
-  Unitree MuJoCo + SDK2 bridge 30 秒站立、ROS 2 Humble 四包编译。
-- 当前候选：`deploy/candidates/model_5498_robust`；已通过站立，尚未学会有效速度跟踪。
+- 已验证：速度课程、45/12 策略契约、ONNX 导出、标准 MuJoCo 长时速度回放、
+  Unitree MuJoCo + SDK2 bridge 接口闭环、ROS 2 Humble 四包编译。
+- 当前仿真候选：`deploy/candidates/model_4500_yaw_straight`；候选 YAML 显式包含低速
+  command calibration 和高速目标校准，Python MuJoCo 已通过请求速度 `0~3 m/s` 的
+  长时验收，但尚未进行真实机器人落地验收。
+- 已拒绝候选：同一微调 run 的 `model_4695` 和后续长训 checkpoint；它们在高速
+  sim2sim 中偏航恶化或翻倒，不能按“最后一个 checkpoint”直接部署。
 - 未完成：真实 GOM-8010-6 RS485 协议、编码器零点、方向标定、急停链路和落地验收。
 
 Isaac Sim 在当前 WSL 中不能创建 Vulkan/RTX 设备，因此日志中可能出现
@@ -321,18 +325,41 @@ for vx in 0 0.25 0.5 1.0 1.5 2.0 2.5 3.0; do
 done
 ```
 
-`run_sim2sim.py` 会输出机身坐标系的平均 `vx/vy`、速度绝对误差、偏航角速度、最小
-机身高度、最大倾角以及足端接触 duty/transitions。当前建议的实机候选门槛是：每个
-速度点不摔倒，`abs_error <= 0.3 m/s`，`max_tilt <= 15 deg`，`min_height >= 0.22 m`；
-任一点不满足就保留 checkpoint 做诊断，不部署到 Orin NX。
+`run_sim2sim.py` 会输出外部请求的 `command_vx`、实际机身坐标系 `vx/vy`、用于
+observation 的 `policy_vx`、速度绝对误差、偏航角速度、最小机身高度、最大倾角以及
+足端接触 duty/transitions。当前候选的仿真门槛是：不摔倒，`max_tilt <= 15 deg`、
+`min_height >= 0.22 m`；`0.1~0.5 m/s` 使用 `abs_error <= max(0.05, 0.25*vx)`，
+`0.5~3 m/s` 使用 `abs_error <= 0.15 m/s`。任一点不满足就保留 checkpoint 做诊断，
+不部署到 Orin NX。
 
 2026-08-09 的实验记录：早期 `speed_v1` 和 `speed_high_v1` 分别停在 `2.0 m/s`。
 随后从正确恢复的 checkpoint 继续运行 `speed_full_v1_extend`，最终模型位于
 `logs/rsl_rl/custom_dog_velocity/2026-08-09_01-49-22_speed_full_v1_extend`。MuJoCo
 逐点测试 `0~3 m/s` 的速度误差为 `0.001~0.143 m/s`，最大倾角小于 `6 deg`，最小
 机身高度 `0.236 m`；`3.0 m/s` 延长到 30 秒仍未摔倒。当前策略通过了“前向速度和
-姿态”的 sim2sim 验收，但零偏航命令下平均偏航角速度约 `0.093 rad/s`，世界坐标
-轨迹会转弯；这需要在实机低速测试中继续校准 yaw/IMU 符号，不能直接按最高速部署。
+姿态”的初步 sim2sim 验收，但零偏航命令下平均偏航角速度约 `0.093 rad/s`。独立核对
+MuJoCo gyro、四元数航向积分和关节映射后，确认这是策略/动力学偏置，不是传感器符号错误。
+
+为此新增 `CustomDog-Velocity-SpeedStraight-v1`：保持 observation 为 45 维，把侧向和
+偏航指令固定为零，并加入按指令计算的 yaw-rate L2 奖励。短微调 run
+`2026-08-09_02-26-29_yaw_straight_finetune` 中，最早的 `model_4500` 通过了 sim2sim；
+后续 `model_4695` 和长续训 checkpoint 反而偏航恶化或翻倒，因此不采用。
+
+当前冻结候选位于 `deploy/candidates/model_4500_yaw_straight`。其 YAML 在
+`0.1~0.6 m/s` 显式映射外部请求以跨过低速 gait dead zone，并在 `2.6~3.0 m/s`
+线性加入左右 thigh `+/-0.02 rad` 的目标位置校准。请求速度 15 秒网格全部未摔倒，
+误差不超过 `0.067 m/s`；0.1、0.25、0.5、2.5、2.75、3.0 m/s 的 60 秒测试也全部
+未摔倒，误差不超过 `0.022 m/s`。完整数据和复现命令见
+[`docs/speed_straight_report_2026-08-09.md`](docs/speed_straight_report_2026-08-09.md)。
+
+这两项校准目前由本仓库 Python sim2sim 控制器读取。Unitree C++/ROS 2 action 后处理也
+必须实现相同公式，并在真实机器人上重新标定；否则不能把该候选标记为硬件可用。
+
+若要让 policy 本身逐步消除低速校准，可使用实验任务
+`CustomDog-Velocity-SpeedBalancedTune-v1`。它保持 `0~3 m/s` 全范围样本，同时让约一半
+非站立环境从 `0.1~0.5 m/s` 采样，并只在该段增加相对速度误差项。该任务使用固定
+`1e-5` 学习率和每 5 轮 checkpoint；必须从稳定候选短微调并逐点 sim2sim，不能默认采用
+最后一轮。当前实验 checkpoint 尚未整体优于已冻结候选，因此没有替换发布包。
 
 ## 5. 导出 ONNX
 
@@ -397,14 +424,19 @@ joint velocity             12
 previous action            12
 ```
 
-Action 后处理为：
+Action 后处理为（先 clip，再加入可选 bias）：
 
 ```text
-target_position = default_joint_pos + 0.25 * policy_action
+target_base = clip(default_joint_pos + 0.25 * policy_action, exported_action_clip)
+target_position = target_base + speed_blend * optional_joint_target_bias
 ```
 
-当前策略是关节位置目标策略，不是直接力矩策略。Kp/Kd 在低层执行器控制中生效。
+外部速度指令若候选 YAML 声明 `command_calibration`，先插值为 policy command 写入
+observation；日志和安全逻辑仍保留外部请求。当前策略是关节位置目标策略，不是直接
+力矩策略。Kp/Kd 在低层执行器控制中生效。
 当前候选固定使用关节侧 `Kp=25`、`Kd=0.5`，与 Isaac 训练执行器一致。
+可选 `joint_target_bias` 只改变下发目标，45 维 observation 中的 `last_action` 仍然是
+原始 ONNX action，不能回填处理后的目标位置。
 
 `params/deploy.yaml` 中的 `joint_ids_map` 是动作和 SDK 电机编号的唯一权威映射，
 不能通过名称排序自行推断。每次 observation、action、关节顺序或缩放变化，都必须
@@ -483,7 +515,7 @@ MuJoCo 控制器每 0.02 秒执行一次：
 拼成 45 维 observation
 调用 policy.onnx
 得到 12 维 action
-转换成目标关节位置
+转换成目标关节位置并应用候选 YAML 的可选校准
 ```
 
 必须使用和训练端完全一致的：
@@ -517,13 +549,14 @@ sim2sim 失败时先修模型和接口，不要直接修改实机参数来掩盖
 
 ```bash
 ./scripts/run_unitree_sim2sim.sh deploy/candidates/model_5498_robust
+./scripts/run_unitree_sim2sim.sh deploy/candidates/model_4500_yaw_straight
 ```
 
 执行前需按 [`docs/unitree_mujoco_startup_patch.md`](docs/unitree_mujoco_startup_patch.md)
 在两个上游工作区应用启动时序补丁并重新构建。该命令验证的是 MJCF、DDS、SDK2
-`LowState/LowCmd` 和 ONNX controller 的接口闭环；默认零速度指令，不代表当前策略已经
-学会稳定行走。策略效果以 [`docs/training_report_2026-08-08_15-57-41.md`](docs/training_report_2026-08-08_15-57-41.md)
-中的 5000 轮分析和后续 sim2sim 结果为准。
+`LowState/LowCmd` 和 ONNX controller 的接口闭环；默认零速度指令。当前上游 C++
+controller 尚未读取 `model_4500_yaw_straight` 的 command/target calibration，因此该命令不能
+替代 Python MuJoCo 的 0~3 m/s 验收，也不能直接证明 Orin 部署完成。
 
 ## 9. 查看可视化效果
 
@@ -544,18 +577,21 @@ Isaac Lab 同域 playback（需要 Isaac Sim 能创建 Vulkan/RTX 图形设备�
 标准 MuJoCo policy playback（WSL 当前可用）：
 
 ```bash
-./scripts/view_mujoco_policy.sh deploy/candidates/model_5498_robust 0.0 0.0 0.0
+./scripts/view_mujoco_policy.sh deploy/candidates/model_4500_yaw_straight 1.0 0.0 0.0
+./scripts/view_mujoco_policy.sh deploy/candidates/model_4500_yaw_straight 3.0 0.0 0.0
 ```
 
 官方 Unitree MuJoCo + SDK2 bridge playback：
 
 ```bash
-./scripts/run_unitree_sim2sim.sh deploy/candidates/model_5498_robust
+./scripts/run_unitree_sim2sim.sh deploy/candidates/model_4500_yaw_straight
 ```
 
-本机实测 `model_5498_robust` 在标准 MuJoCo 和官方 SDK2 bridge 中均能零速站立
+历史基线 `model_5498_robust` 在标准 MuJoCo 和官方 SDK2 bridge 中均能零速站立
 30 秒，两个控制器的 observation/action trace 逐项误差小于 `1e-5`。标准 MuJoCo
 `0.2 m/s` 指令下 30 秒只移动约 `0.009 m`，因此它是稳定站立候选，不是正常行走策略。
+当前行走候选的标准 MuJoCo 结果见
+[`docs/speed_straight_report_2026-08-09.md`](docs/speed_straight_report_2026-08-09.md)。
 
 当前 WSL 的 Isaac GUI 实测失败于 `No device could be created`、`Graphics plugins not
 available` 和 `nvidia-smi not found in /usr/bin`。PyTorch CUDA 和 CPU PhysX 训练不受
@@ -716,3 +752,4 @@ CUSTOM_DOG_MAX_ITERATIONS=5000 \
 - [部署流程](docs/deployment.md)
 - [策略接口契约](docs/policy_contract.md)
 - [鲁棒微调与 sim2sim 报告](docs/robust_finetune_report_2026-08-08.md)
+- [0~3 m/s 速度与偏航 sim2sim 报告](docs/speed_straight_report_2026-08-09.md)

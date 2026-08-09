@@ -5,6 +5,7 @@
 
 namespace custom_dog_controller {
 
+constexpr char kPolicyContractVersion[] = "1.2";
 constexpr std::size_t kJointCount = 12;
 constexpr std::size_t kObservationDim = 45;
 constexpr std::size_t kActionDim = 12;

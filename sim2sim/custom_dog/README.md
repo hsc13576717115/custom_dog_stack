@@ -44,7 +44,7 @@ cd /home/hsc/custom_dog_stack
 
 ## 加载 ONNX 策略
 
-`policy.onnx` 和 `deploy.yaml` 必须来自同一个训练 run：
+`policy.onnx` 和 `deploy.yaml` 必须来自同一个训练 run 或同一个冻结候选：
 
 ```bash
 ./scripts/run_sim2sim.sh \
@@ -59,18 +59,39 @@ cd /home/hsc/custom_dog_stack
 `joint_ids_map` 和 `step_dt`。当前模型的 MuJoCo 步长为 0.005 秒，策略每四个仿真步
 执行一次，即 50 Hz。
 
+若 YAML 声明 `command_calibration.lin_vel_x`，`--command` 是外部 requested speed，
+控制器会把它插值为 observation 中的 policy speed；输出指标仍与 requested speed
+比较，并同时打印 `policy_vx`。这张表是显式的模型校准，移植到 C++/ROS 2 时必须保持一致。
+
+当前速度候选的复现命令：
+
+```bash
+./scripts/run_sim2sim.sh \
+  --policy deploy/candidates/model_4500_yaw_straight/exported/policy.onnx \
+  --deploy-yaml deploy/candidates/model_4500_yaw_straight/params/deploy.yaml \
+  --command 3.0 0.0 0.0 --duration 60 --warmup 10
+```
+
+候选 YAML 的可选 `joint_target_bias` 在 action clip 后、SDK 关节映射前加入目标关节位置；
+下一帧 `last_action` 仍使用原始 ONNX action。完整公式和验收结果见
+[`../../docs/speed_straight_report_2026-08-09.md`](../../docs/speed_straight_report_2026-08-09.md)。
+
 当前仓库的 Python runner 是自制 RS485 控制栈的主 sim2sim 路径。
 官方 Unitree MuJoCo 可以直接作为本项目的 SDK2 sim2sim 端：
 
 ```bash
 cd /home/hsc/custom_dog_stack
-./scripts/run_unitree_sim2sim.sh deploy/candidates/model_4999
+./scripts/run_unitree_sim2sim.sh deploy/candidates/model_4500_yaw_straight
 ```
 
 该脚本启动官方 `unitree_mujoco` 和官方 `go2_ctrl`，通过本机 DDS `domain=1`、网卡
 `lo` 闭环。控制器会自动进入 `Passive -> FixStand -> Velocity`；默认没有手柄速度
 指令，因此只用于启动、接口和安全状态验证。真实运动指令需要在 `lo` 对应的 SDK2
 控制器中接入 joystick/command 源。
+
+当前上游 C++ action 后处理不会读取 `command_calibration` 或 `joint_target_bias`。在同步实现这些字段并重建前，
+官方 bridge 命令不等价于本仓库 Python runner 的高速校准结果，也不能作为 Orin NX
+行走验收。
 
 官方二进制的启动补丁位于上游工作区 `/home/hsc/unitree_mujoco`，包括 home keyframe
 初始化、bridge 就绪前暂停物理步进和初始 home PD。`/home/hsc/unitree_rl_lab` 的

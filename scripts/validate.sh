@@ -7,6 +7,8 @@ python3 -m unittest discover -s "${project_root}/tests" -v
 python3 -m py_compile \
     "${project_root}/rl/src/custom_dog_rl/assets/custom_dog.py" \
     "${project_root}/rl/src/custom_dog_rl/tasks/locomotion/velocity_env_cfg.py" \
+    "${project_root}/rl/src/custom_dog_rl/tasks/locomotion/mdp/commands.py" \
+    "${project_root}/rl/src/custom_dog_rl/tasks/locomotion/mdp/rewards.py" \
     "${project_root}/rl/src/custom_dog_rl/agents/ppo_cfg.py" \
     "${project_root}/rl/scripts/train.py" \
     "${project_root}/rl/scripts/play.py" \
@@ -15,6 +17,7 @@ python3 -m py_compile \
     "${project_root}/sim2sim/custom_dog/create_unitree_mjcf.py" \
     "${project_root}/sim2sim/custom_dog/validate_unitree_mjcf.py" \
     "${project_root}/sim2sim/custom_dog/run_sim2sim.py" \
-    "${project_root}/sim2sim/unitree_deploy/prepare_controller.py"
+    "${project_root}/sim2sim/unitree_deploy/prepare_controller.py" \
+    "${project_root}/scripts/analyze_policy_trace.py"
 
 echo "Static validation passed."

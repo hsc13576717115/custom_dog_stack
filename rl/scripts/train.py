@@ -191,7 +191,10 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     if agent_cfg.resume or agent_cfg.algorithm.class_name == "Distillation":
         print(f"[INFO]: Loading model checkpoint from: {resume_path}")
         # load previously trained model
-        runner.load(resume_path)
+        load_optimizer = os.environ.get("CUSTOM_DOG_LOAD_OPTIMIZER", "1").lower() not in {"0", "false", "no"}
+        runner.load(resume_path, load_optimizer=load_optimizer)
+        if not load_optimizer:
+            print("[INFO]: Optimizer state reset; using the configured fine-tune learning rate")
 
     # dump the configuration into log-directory
     dump_yaml(os.path.join(log_dir, "params", "env.yaml"), env_cfg)

@@ -2,6 +2,7 @@ schema_version: 1
 validated_for_hardware: false
 
 policy:
+  contract_version: "1.2"
   observation_dim: 45
   action_dim: 12
   step_dt: 0.02

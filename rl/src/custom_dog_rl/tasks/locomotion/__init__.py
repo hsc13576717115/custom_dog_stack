@@ -68,3 +68,25 @@ gym.register(
         "rsl_rl_cfg_entry_point": "custom_dog_rl.agents.ppo_cfg:CustomDogPPORunnerCfg",
     },
 )
+
+gym.register(
+    id="CustomDog-Velocity-SpeedStraight-v1",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.velocity_env_cfg:RobotSpeedStraightEnvCfg",
+        "play_env_cfg_entry_point": f"{__name__}.velocity_env_cfg:RobotSpeedStraightPlayEnvCfg",
+        "rsl_rl_cfg_entry_point": "custom_dog_rl.agents.ppo_cfg:CustomDogPPORunnerCfg",
+    },
+)
+
+gym.register(
+    id="CustomDog-Velocity-SpeedBalancedTune-v1",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.velocity_env_cfg:RobotSpeedBalancedTuneEnvCfg",
+        "play_env_cfg_entry_point": f"{__name__}.velocity_env_cfg:RobotSpeedBalancedTunePlayEnvCfg",
+        "rsl_rl_cfg_entry_point": "custom_dog_rl.agents.ppo_cfg:CustomDogFineTunePPORunnerCfg",
+    },
+)

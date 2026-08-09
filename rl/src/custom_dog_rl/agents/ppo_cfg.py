@@ -31,3 +31,17 @@ class CustomDogPPORunnerCfg(RslRlOnPolicyRunnerCfg):
         desired_kl=0.01,
         max_grad_norm=1.0,
     )
+
+
+@configclass
+class CustomDogFineTunePPORunnerCfg(CustomDogPPORunnerCfg):
+    """Conservative optimizer and checkpoint cadence for short fine-tunes."""
+
+    def __post_init__(self):
+        super().__post_init__()
+        self.save_interval = 5
+        self.algorithm.learning_rate = 1.0e-5
+        self.algorithm.schedule = "fixed"
+        self.algorithm.num_learning_epochs = 2
+        self.algorithm.entropy_coef = 0.0
+        self.algorithm.desired_kl = 0.005

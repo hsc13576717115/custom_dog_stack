@@ -229,6 +229,83 @@ class RobotSpeedFullPlayEnvCfg(RobotSpeedFullEnvCfg):
 
 
 @configclass
+class RobotSpeedStraightEnvCfg(RobotSpeedFullEnvCfg):
+    """Straight-line final tune with zero lateral and yaw commands."""
+
+    def __post_init__(self):
+        super().__post_init__()
+        self.commands.base_velocity.ranges.lin_vel_y = (0.0, 0.0)
+        self.commands.base_velocity.ranges.ang_vel_z = (0.0, 0.0)
+        self.commands.base_velocity.limit_ranges.lin_vel_y = (0.0, 0.0)
+        self.commands.base_velocity.limit_ranges.ang_vel_z = (0.0, 0.0)
+        self.rewards.track_ang_vel_z.weight = 2.0
+        self.rewards.track_ang_vel_z.params["std"] = 0.1
+        # Preserve a non-saturating yaw-error gradient during the dedicated
+        # straight-line tune without changing the general speed tasks.
+        self.rewards.track_ang_vel_z_l2 = RewTerm(
+            func=custom_mdp.track_ang_vel_z_l2,
+            weight=-2.0,
+            params={"command_name": "base_velocity"},
+        )
+
+
+@configclass
+class RobotSpeedStraightPlayEnvCfg(RobotSpeedStraightEnvCfg):
+    def __post_init__(self):
+        super().__post_init__()
+        self.scene.num_envs = 32
+        self.scene.terrain.terrain_generator.num_rows = 2
+        self.scene.terrain.terrain_generator.num_cols = 1
+        self.commands.base_velocity.ranges = self.commands.base_velocity.limit_ranges
+
+
+@configclass
+class RobotSpeedBalancedTuneEnvCfg(RobotSpeedStraightEnvCfg):
+    """Experimental full-range tune that oversamples the low-speed band."""
+
+    def __post_init__(self):
+        super().__post_init__()
+        self.commands.base_velocity = custom_mdp.MixedForwardVelocityCommandCfg(
+            asset_name="robot",
+            resampling_time_range=(10.0, 10.0),
+            rel_standing_envs=0.05,
+            rel_low_speed_envs=0.5,
+            low_speed_range=(0.1, 0.5),
+            debug_vis=False,
+            ranges=custom_mdp.MixedForwardVelocityCommandCfg.Ranges(
+                lin_vel_x=(0.0, 3.0),
+                lin_vel_y=(0.0, 0.0),
+                ang_vel_z=(0.0, 0.0),
+            ),
+            # Keep the policy/deployment command contract at the full range.
+            limit_ranges=custom_mdp.MixedForwardVelocityCommandCfg.Ranges(
+                lin_vel_x=(0.0, 3.0),
+                lin_vel_y=(0.0, 0.0),
+                ang_vel_z=(0.0, 0.0),
+            ),
+        )
+        self.rewards.track_lin_vel_xy_low_speed_relative_l1 = RewTerm(
+            func=custom_mdp.track_lin_vel_xy_low_speed_relative_l1,
+            weight=-5.0,
+            params={
+                "command_name": "base_velocity",
+                "command_min": 0.1,
+                "command_max": 0.5,
+            },
+        )
+
+
+@configclass
+class RobotSpeedBalancedTunePlayEnvCfg(RobotSpeedBalancedTuneEnvCfg):
+    def __post_init__(self):
+        super().__post_init__()
+        self.scene.num_envs = 32
+        self.scene.terrain.terrain_generator.num_rows = 2
+        self.scene.terrain.terrain_generator.num_cols = 1
+        self.commands.base_velocity.ranges = self.commands.base_velocity.limit_ranges
+
+
+@configclass
 class RobotRobustEnvCfg(RobotEnvCfg):
     """Low-speed fine-tuning task with deployment-like reset perturbations."""
 
