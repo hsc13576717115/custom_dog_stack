@@ -26,7 +26,26 @@ parser.add_argument(
 )
 parser.add_argument("--num_envs", type=int, default=None, help="Number of environments to simulate.")
 parser.add_argument("--max_steps", type=int, default=None, help="Stop after this many simulation steps.")
+parser.add_argument(
+    "--fixed_command",
+    nargs=3,
+    type=float,
+    metavar=("VX", "VY", "YAW"),
+    help="Override base_velocity with a fixed body-frame command during playback.",
+)
+parser.add_argument(
+    "--metric_warmup_steps",
+    type=int,
+    default=100,
+    help="Playback steps excluded from fixed-command metrics.",
+)
 parser.add_argument("--task", type=str, default=None, help="Name of the task.")
+parser.add_argument(
+    "--rl_device",
+    type=str,
+    default=None,
+    help="Device used by the RSL-RL policy runner, for example cuda:0 or cpu.",
+)
 parser.add_argument(
     "--use_pretrained_checkpoint",
     action="store_true",
@@ -56,6 +75,7 @@ import torch
 from rsl_rl.runners import OnPolicyRunner
 
 import isaaclab_tasks  # noqa: F401
+import unitree_rl_lab.tasks  # noqa: F401
 from isaaclab.envs import DirectMARLEnv, multi_agent_to_single_agent
 from isaaclab.utils.assets import retrieve_file_path
 from isaaclab.utils.dict import print_dict
@@ -77,6 +97,8 @@ def main():
         entry_point_key="play_env_cfg_entry_point",
     )
     agent_cfg: RslRlOnPolicyRunnerCfg = cli_args.parse_rsl_rl_cfg(args_cli.task, args_cli)
+    if args_cli.rl_device is not None:
+        agent_cfg.device = args_cli.rl_device
 
     # specify directory for logging experiments
     log_root_path = os.path.join("logs", "rsl_rl", agent_cfg.experiment_name)
@@ -126,7 +148,7 @@ def main():
         runner = DistillationRunner(env, agent_cfg.to_dict(), log_dir=None, device=agent_cfg.device)
     else:
         raise ValueError(f"Unsupported runner class: {agent_cfg.class_name}")
-    runner.load(resume_path)
+    runner.load(resume_path, map_location=agent_cfg.device)
 
     # obtain the trained policy for inference
     policy = runner.get_inference_policy(device=env.unwrapped.device)
@@ -155,11 +177,30 @@ def main():
 
     dt = env.unwrapped.step_dt
 
+    def apply_fixed_command():
+        if args_cli.fixed_command is None:
+            return
+        command_term = env.unwrapped.command_manager.get_term("base_velocity")
+        command = torch.tensor(
+            args_cli.fixed_command,
+            dtype=command_term.vel_command_b.dtype,
+            device=command_term.vel_command_b.device,
+        )
+        command_term.vel_command_b[:] = command
+        if hasattr(command_term, "_sampled_vel_command_b"):
+            command_term._sampled_vel_command_b[:] = command
+        command_term.is_standing_env[:] = False
+
     # reset environment
+    apply_fixed_command()
     obs = env.get_observations()
     if version("rsl-rl-lib").startswith("2.3."):
         obs, _ = env.get_observations()
     timestep = 0
+    velocity_samples = []
+    yaw_rate_samples = []
+    height_samples = []
+    tilt_samples = []
     # simulate environment
     while simulation_app.is_running():
         start_time = time.time()
@@ -169,6 +210,19 @@ def main():
             actions = policy(obs)
             # env stepping
             obs, _, _, _ = env.step(actions)
+            apply_fixed_command()
+            if args_cli.fixed_command is not None:
+                obs = env.get_observations()
+                if version("rsl-rl-lib").startswith("2.3."):
+                    obs, _ = obs
+                if timestep >= args_cli.metric_warmup_steps:
+                    robot = env.unwrapped.scene["robot"]
+                    velocity_samples.append(robot.data.root_lin_vel_b[:, :2].clone())
+                    yaw_rate_samples.append(robot.data.root_ang_vel_b[:, 2].clone())
+                    height_samples.append(robot.data.root_pos_w[:, 2].clone())
+                    tilt_samples.append(
+                        torch.acos(torch.clamp(-robot.data.projected_gravity_b[:, 2], -1.0, 1.0))
+                    )
         if args_cli.video:
             timestep += 1
             # Exit the play loop after recording one video
@@ -183,6 +237,22 @@ def main():
         sleep_time = dt - (time.time() - start_time)
         if args_cli.real_time and sleep_time > 0:
             time.sleep(sleep_time)
+
+    if velocity_samples:
+        velocity = torch.cat(velocity_samples)
+        yaw_rate = torch.cat(yaw_rate_samples)
+        height = torch.cat(height_samples)
+        tilt = torch.cat(tilt_samples)
+        print(
+            "fixed-command metrics: "
+            f"command={args_cli.fixed_command}, "
+            f"mean_vx={velocity[:, 0].mean().item():.3f} m/s, "
+            f"mean_vy={velocity[:, 1].mean().item():.3f} m/s, "
+            f"mean_yaw_rate={yaw_rate.mean().item():.3f} rad/s, "
+            f"min_height={height.min().item():.3f} m, "
+            f"mean_height={height.mean().item():.3f} m, "
+            f"max_tilt={torch.rad2deg(tilt.max()).item():.2f} deg"
+        )
 
     # close the simulator
     env.close()

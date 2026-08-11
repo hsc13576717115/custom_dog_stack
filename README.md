@@ -10,21 +10,35 @@ sim2sim 和悬空测试把 ONNX 接到电机。
 
 - URDF：17 个 link、16 个 joint、12 个可驱动关节。
 - 电机：GO-M8010-6；hip/thigh 直接输出，calf 当前按额外 2:1 传动建模。
-- 策略接口：45 维 observation、12 维关节位置 action、50 Hz。
-- WSL 训练：CPU PhysX + RTX 4060 CUDA PPO。
+- 策略接口：45 维基础 observation，或 47 维 phase/机身 `vx/vy` 反馈 observation；
+  12 维关节位置 action、50 Hz。47 维扩展类型必须读取候选 `deploy.yaml`，不能只看维度。
+- WSL 训练：CPU PhysX + RTX 4060 CUDA PPO。当前会话
+  `torch.cuda.is_available()` 为 `True`；Isaac Sim 的 Vulkan/RTX 渲染设备仍不可用。
 - 已验证：速度课程、45/12 策略契约、ONNX 导出、标准 MuJoCo 长时速度回放、
   Unitree MuJoCo + SDK2 bridge 接口闭环、ROS 2 Humble 四包编译。
-- 当前仿真候选：`deploy/candidates/model_4500_yaw_straight`；候选 YAML 显式包含低速
+- 当前前进高速候选：`deploy/candidates/model_4500_yaw_straight`；候选 YAML 显式包含低速
   command calibration 和高速目标校准，Python MuJoCo 已通过请求速度 `0~3 m/s` 的
   长时验收，但尚未进行真实机器人落地验收。
+- 当前三轴 sim2sim 候选：`deploy/candidates/model_800_omni_stability_calibrated`；支持
+  `vx/vy/wz` 和 47 维 phase observation，关节侧 `Kp=25/Kd=0.5`。训练 reward 不包含
+  显式机身高度目标，策略可以在较快运动时自然压低机身；20 秒固定命令矩阵和 56 秒
+  动态切换已通过 MuJoCo 验收。外部安全范围暂定为 `vx 0~0.6 m/s`、
+  `vy +/-0.17 m/s`、`wz +/-0.6 rad/s`。纯侧移和原地偏航仍有约 `0.07~0.13 m/s`
+  的非指令前向耦合，因此这是当前可视化和继续训练的基线，不是实机发布结论。
+  `model_710_compact_height_polish` 和 `model_700_compact_omni_balanced` 保留为回退。
+  所有候选均未进行真实机器人落地验收。
 - 已拒绝候选：同一微调 run 的 `model_4695` 和后续长训 checkpoint；它们在高速
   sim2sim 中偏航恶化或翻倒，不能按“最后一个 checkpoint”直接部署。
+- 已拒绝 47 维迁移：`omni47_velocity_feedback_from4840_100` 和
+  `omni47_input_adapter_from4840_100` 均未降低高速转弯横向串扰，没有 checkpoint 进入
+  `deploy/candidates/`；详见对应消融报告。
 - 未完成：真实 GOM-8010-6 RS485 协议、编码器零点、方向标定、急停链路和落地验收。
 
 Isaac Sim 在当前 WSL 中不能创建 Vulkan/RTX 设备，因此日志中可能出现
 `No device could be created` 或 `CUDA libs are present, but no suitable CUDA GPU was found`。
-只要 PyTorch CUDA 可用、训练脚本返回成功并保存 checkpoint，当前配置仍然可以训练：
-Isaac Sim/PhysX 使用 CPU，PPO 网络使用 CUDA。
+只有 `torch.cuda.is_available()` 为 `True` 时才能让 PPO 使用 CUDA。Isaac Sim 的 Vulkan
+报错和 PyTorch CUDA 是两个不同检查项；当前配置明确让 PhysX 使用 CPU、PPO 使用
+`cuda:0`，因此 Vulkan 报错不会把策略网络训练自动降到 CPU。
 
 ## 目录职责
 
@@ -361,6 +375,170 @@ MuJoCo gyro、四元数航向积分和关节映射后，确认这是策略/动�
 `1e-5` 学习率和每 5 轮 checkpoint；必须从稳定候选短微调并逐点 sim2sim，不能默认采用
 最后一轮。当前实验 checkpoint 尚未整体优于已冻结候选，因此没有替换发布包。
 
+### 开源全向训练与恢复参考
+
+`unitree_rl_lab` 的四足任务类别主要是 velocity tracking，但它并非只有一个奖励：当前
+自制狗基础任务已经包含速度/偏航跟踪、姿态、关节位姿、关节限位、动作变化、力矩、能耗、
+足端滞空、足端滑动、非法接触和终止等项。不同开源工程最值得迁移的是任务结构，而不是把
+大量 reward 名称原样相加：
+
+- [`robot_lab`](https://github.com/fan-ziqi/robot_lab)：同为 Isaac Lab ManagerBased 环境，Go2 全向速度任务和 RSL-RL 左右镜像
+  数据增强可直接参考；本仓库已据此加入 `CustomDog-Velocity-OmniSymmetry-v1`。
+- [`basic-locomotion-isaaclab`](https://github.com/iit-DLSLab/basic-locomotion-isaaclab)：公开 Go2 `concurrent_symm` 的训练配置和测试权重，同时包含
+  morphological symmetry、状态估计、MuJoCo sim2sim 和 ROS 2 sim2real。其 observation
+  带并发状态估计器，必须先做契约映射，不能直接替换本仓库 45 维 ONNX。
+- [`MuJoCo Playground`](https://github.com/google-deepmind/mujoco_playground)：`Go1Joystick` 是完整 `vx/vy/yaw` 任务；`Go1Getup` 是独立恢复
+  任务。Getup 使用相对当前关节位置的动作目标以及朝向、高度、站姿门控奖励，适合用于
+  趴姿恢复阶段，不应直接和早期全向步态一起训练。
+- [`Walk These Ways`](https://github.com/Improbable-AI/walk-these-ways)：适合后续增加频率、占空比、腿相位、摆脚高度和站距等步态风格命令；
+  它会改变 observation 和部署接口，不属于第一阶段闭环。
+- [`rl_sar`](https://github.com/fan-ziqi/rl_sar)：可参考 ROS 2、ONNX 和 MuJoCo 部署框架，但其 Unitree 通信后端不能替代本项目
+  自己的 USB-RS485 驱动、安全状态机和电机协议。
+
+### Omni-45 v2 主线（当前推荐）
+
+三套上游的奖励思想已选择性迁移到 `CustomDog-Velocity-Omni45-v2`：
+
+- [`legged_gym`](https://github.com/leggedrobotics/legged_gym) 的线速度/偏航跟踪、姿态、能耗、
+  关节速度/加速度、动作变化和碰撞等基础速度与稳定性项；
+- [`HIMLoco`](https://github.com/InternRobotics/HIMLoco) 的二阶动作平滑；
+- [`Walk These Ways`](https://github.com/Improbable-AI/walk-these-ways) 的接触足滑移、落地冲击和
+  Raibert 足端落点思想。
+
+这些项按 Isaac Lab Manager API 重新实现或复用 Isaac Lab 等价项，没有直接搬运旧 Isaac Gym
+环境。没有迁移 gait phase、历史观测或 AMP，因此导出契约仍是 `45 -> 12`，可以沿用当前
+ROS 2/Orin observation 代码。
+
+这个任务从随机初始化开始，不要从 `model_4500` 续训。命令使用四个分桶：前进/后退、纯侧向、
+纯偏航、三轴组合；每个分桶都对左右符号对称采样。初始范围为
+`vx=[-0.5,0.5]`、`vy=[-0.15,0.15]`、`wz=[-0.4,0.4]`，只有线速度和偏航跟踪同时达到
+`0.70` 才扩展，最终上限为 `vx=[-1,1]`、`vy=[-0.4,0.4]`、`wz=[-1,1]`。
+
+奖励保留速度/偏航跟踪作为主项，并加入：
+
+- legged_gym 风格的基础速度、偏航、姿态、能耗、关节与碰撞奖励；
+- 一阶 `action_rate` 和 HIMLoco 风格的二阶 `action_smoothness_2`；
+- Walk These Ways 风格的 `feet_slide`，以及首次接触的软落地和冲击速度；
+- 从 MuJoCo home 姿态测得的四个足端 xyz 落点，加入速度和偏航预测后的软 Raibert 站立落点约束；
+- RSL-RL 左右镜像数据增强。没有固定 hip=0 或固定机身高度目标，侧移和转向时 hip 可以自然变化。
+
+先跑 1 轮 smoke：
+
+```bash
+cd /home/hsc/custom_dog_stack
+OMNI_KIT_ACCEPT_EULA=YES \
+CUSTOM_DOG_TASK=CustomDog-Velocity-Omni45-v2 \
+CUSTOM_DOG_NUM_ENVS=32 \
+CUSTOM_DOG_MAX_ITERATIONS=1 \
+./scripts/train.sh --run_name omni45_v2_smoke
+```
+
+本机 WSL 的 Isaac Sim 仍会打印 Vulkan/RTX 不可用并使用 CPU PhysX；这不影响 PPO 使用
+`cuda:0`。smoke 成功标准是日志显示 policy `(45,)`、action `12`、命令类型
+`StratifiedOmniVelocityCommand`，并保存 `model_0.pt`。
+
+通过 smoke 后启动正式主线（每 20 轮保存 checkpoint）：
+
+```bash
+cd /home/hsc/custom_dog_stack
+OMNI_KIT_ACCEPT_EULA=YES \
+CUSTOM_DOG_TASK=CustomDog-Velocity-Omni45-v2 \
+CUSTOM_DOG_NUM_ENVS=128 \
+CUSTOM_DOG_MAX_ITERATIONS=5000 \
+./scripts/train.sh --run_name omni45_v2_main
+```
+
+训练期间用 `./scripts/tensorboard.sh` 查看 `Metrics/base_velocity/error_vel_xy`、
+`Metrics/base_velocity/error_vel_yaw`、`Episode_Termination/bad_orientation`、
+`Episode_Reward/feet_slide`、`Episode_Reward/stance_foot_placement` 和
+`Loss/symmetry`。每个 checkpoint 必须导出到独立目录，然后在 MuJoCo 逐点测试
+`vx={-1,-0.5,0,0.5,1}`、`vy={-0.4,0,0.4}`、`wz={-1,0,1}`；验收记录速度误差、hip 外展、
+动作一阶/二阶变化率、最低机身高度、最大倾角、足端滑移和是否摔倒。只有通过这组
+sim2sim 网格的 checkpoint 才进入 ONNX/ROS 2 部署候选。
+
+### Omni-45 v3 精修
+
+`model_4999.pt` 已经在 v2 中覆盖完整 `[-1,1] / [-0.4,0.4] / [-1,1]` 命令范围，
+但固定点测试表明低速前进、纯侧移和零指令轴漂移仍是局部最优。不要重新随机训练十万轮；
+先使用独立的 `CustomDog-Velocity-Omni45-Polish-v3` 做低学习率续训。v3 保持 45→12
+契约，固定使用完整命令范围，并提高纯侧移和 `0.15~0.40 m/s` 双向低速样本比例；组合样本
+只使用常见的 `vx+wz`。奖励增加分轴相对误差、非指令轴漂移和触地前一步的 soft landing，
+同时启用弱 mirror loss。它仍不限制 hip 角度，也不设置机身高度目标。
+
+```bash
+cd /home/hsc/custom_dog_stack
+OMNI_KIT_ACCEPT_EULA=YES \
+CUSTOM_DOG_TASK=CustomDog-Velocity-Omni45-Polish-v3 \
+CUSTOM_DOG_NUM_ENVS=128 \
+CUSTOM_DOG_MAX_ITERATIONS=1000 \
+CUSTOM_DOG_LOAD_OPTIMIZER=0 \
+./scripts/train.sh --run_name omni45_v3_polish_from4999 \
+  --resume \
+  --load_run 2026-08-11_11-31-14_omni45_v2_vx1_omni_main \
+  --checkpoint model_4999.pt
+```
+
+`CUSTOM_DOG_LOAD_OPTIMIZER=0` 是必要条件：它保留 actor/critic 权重，但用 v3 的
+`5e-5` 固定学习率重新建立优化器。训练每 20 轮保存一次。新增的 signed error 与 signed
+fraction 在 TensorBoard 中成对出现；某个方向的条件平均误差等于对应
+`signed_error / signed_fraction`，这样正负方向的误差不会在总平均中互相掩盖。
+
+如果 v3 的前 200~400 轮出现纯侧移过冲，不要继续使用该支线的最后 checkpoint。可从
+`model_5200.pt` 启动保守支线：纯侧移训练带先收窄到 `vy=[-0.25,0.25]`，但
+`deploy.yaml` 的外部上限仍保留 `[-0.4,0.4]`；同时降低分轴误差和足端风格项的权重，先恢复
+稳定步态，再进行第二阶段的 `vy=[-0.4,0.4]` 扩展。
+
+```bash
+OMNI_KIT_ACCEPT_EULA=YES \
+CUSTOM_DOG_TASK=CustomDog-Velocity-Omni45-Conservative-v3 \
+CUSTOM_DOG_NUM_ENVS=128 \
+CUSTOM_DOG_MAX_ITERATIONS=500 \
+CUSTOM_DOG_LOAD_OPTIMIZER=0 \
+./scripts/train.sh --run_name omni45_v3_conservative_from5200 \
+  --resume \
+  --load_run 2026-08-11_13-31-38_omni45_v3_polish_from4999 \
+  --checkpoint model_5200.pt
+```
+
+#### HIMLoco 与 AMP 的采用边界
+
+当前主线是 Isaac Lab ManagerBased 环境加 RSL-RL PPO，未创建 AMP discriminator，
+也未加载参考动作数据。因此当前 `amp_reward_coef` 等价于 `0`，不是一个遗漏的 reward
+参数。HIMLoco 的核心是利用历史观测学习速度和环境隐变量估计，也不是 AMP。
+
+现阶段不把 HIMLoco 或 AMP 训练器整体嫁接到主线：它会同时改变 observation、runner、
+ONNX 导出和 Orin 部署契约，却不能自动修正 CAD/动力学左右不对称、横移串轴或后退局部
+最优。推荐在平地三轴策略验收后建立两个独立版本：
+
+- `Robust-v2` 参考 HIMLoco 的 history encoder/estimator，用于扰动和复杂地形；
+- `Style-v2` 仅在获得与本机 12 关节拓扑一致、物理可执行的参考步态轨迹后加入 AMP。
+
+最终手柄安全范围定义为 `vx=[-3,3] m/s`、`vy=[-0.4,0.4] m/s`、
+`wz=[-1,1] rad/s`。范围是验收目标，不表示现有 checkpoint 已经覆盖它。2026-08-10
+从前进 checkpoint 做的两次负向速度短微调中，稀疏负向采样得到的实际后退速度接近零；
+强制 35% 负向样本又使 `bad_orientation` 超过 50%。这些模型均拒绝。完整双向策略应从
+随机初始化的小速度双向课程开始，再逐级扩展到上述范围，不能通过修改 `deploy.yaml`
+把未训练命令伪装成已支持。
+
+镜像任务的训练入口保持 actor observation 45 维、action 12 维：
+
+```bash
+CUSTOM_DOG_TASK=CustomDog-Velocity-OmniSymmetry-v1 \
+CUSTOM_DOG_NUM_ENVS=128 \
+CUSTOM_DOG_MAX_ITERATIONS=2000 \
+./scripts/train.sh --run_name omni_symmetry_scratch
+```
+
+左右镜像同时变换机身角速度、重力投影、`vx/vy/yaw` 指令、policy/critic 关节量和 action。
+第一阶段命令按纯前进、纯横移、纯偏航和组合四种模式采样，避免随机初始化策略一开始
+同时面对三个不可辨识目标；待这四种模式分别通过 sim2sim 后再扩展倒退和 `3 m/s`。
+数学 involution 测试与 1 iteration PPO smoke 已通过，PPO 日志中可见 `Loss/symmetry`。
+从纯前进 `model_4500` 做的 4510/4520/4530 短迁移在 MuJoCo 中对 `vy=+/-0.25 m/s`、
+`yaw=+/-0.5 rad/s` 仍基本保持四脚着地，实际横移/偏航接近零，因此这些 checkpoint 已
+拒绝，不能部署。下一轮应从随机初始化训练全向任务，或先验证
+`basic-locomotion-isaaclab/tested_policies/go2/concurrent_symm` 的教师契约后做迁移；不要再
+从前进局部最优直接加大奖励微调。
+
 ## 5. 导出 ONNX
 
 假设选择的 checkpoint 是：
@@ -405,11 +583,12 @@ ONNX 只代表策略网络，不包含 URDF、MJCF、RS485 协议、零点和安
 
 ## 6. 策略接口
 
-当前策略契约见 [`docs/policy_contract.md`](docs/policy_contract.md)：
+当前策略契约见 [`docs/policy_contract.md`](docs/policy_contract.md)。基础策略使用 45 维
+observation；带步态时钟的 phase 候选在末尾增加 `sin/cos`，使用 47 维：
 
 ```text
 control period: 0.02 s
-observation: 45 floats
+observation: 45 or 47 floats (由 deploy.yaml 声明)
 action: 12 floats
 ```
 
@@ -422,6 +601,7 @@ velocity command            3
 joint position - default  12
 joint velocity             12
 previous action            12
+optional gait phase         2
 ```
 
 Action 后处理为（先 clip，再加入可选 bias）：
@@ -431,8 +611,9 @@ target_base = clip(default_joint_pos + 0.25 * policy_action, exported_action_cli
 target_position = target_base + speed_blend * optional_joint_target_bias
 ```
 
-外部速度指令若候选 YAML 声明 `command_calibration`，先插值为 policy command 写入
-observation；日志和安全逻辑仍保留外部请求。当前策略是关节位置目标策略，不是直接
+外部速度指令若候选 YAML 声明 `command_calibration`，分别对 `vx/vy/wz` 插值为 policy
+command 写入 observation；`external_ranges` 是外部安全范围，`policy_ranges` 是校准后
+允许写入网络的范围。日志和安全逻辑仍保留外部请求。当前策略是关节位置目标策略，不是直接
 力矩策略。Kp/Kd 在低层执行器控制中生效。
 当前候选固定使用关节侧 `Kp=25`、`Kd=0.5`，与 Isaac 训练执行器一致。
 可选 `joint_target_bias` 只改变下发目标，45 维 observation 中的 `last_action` 仍然是
@@ -495,9 +676,16 @@ URDF -> MJCF 和凸包网格
 ./scripts/teleop_mujoco_policy.sh
 ```
 
+观看 `趴姿 -> 2 秒 FixStand -> 1 秒 PolicyHold -> Velocity` 全流程：
+
+```bash
+CUSTOM_DOG_INITIAL_STATE=prone ./scripts/teleop_mujoco_policy.sh
+```
+
 窗口获得焦点后，`1`/`P`/空格为 Passive，`2`/`R` 为 FixStand，`3`/`V` 为 Velocity；
-`W`/`S` 改前进速度，`A`/`D` 改侧向速度，`Q`/`E` 改偏航速度，`X` 清零。当前冻结候选只
-训练了前进速度，因此使用 `W`/`S` 观察步态最有意义。该入口只控制 MuJoCo，不会发送实机命令。
+`W`/`S` 改前进速度，`A`/`D` 改侧向速度，`Q`/`E` 改偏航速度，`X` 清零。当前默认候选
+训练了 `vx/vy/yaw` 三轴命令。FixStand 使用默认 2 秒五次曲线；切换 Velocity 后先保持
+默认 1 秒零速度，再释放键盘命令。该入口只控制 MuJoCo，不会发送实机命令。
 
 当前 10 秒位置保持测试数值稳定，但机体会有轻微滑移；在把 sim2sim 结果作为
 sim2real 依据前，还要继续优化足端简化碰撞体、摩擦以及 CAD 导出的关节偏轴。
@@ -522,7 +710,8 @@ MuJoCo 控制器每 0.02 秒执行一次：
 读取 projected gravity
 读取速度指令
 读取 12 个关节位置和速度
-拼成 45 维 observation
+按 deploy.yaml 拼成 45 或 47 维 observation
+phase 候选追加 sin/cos 步态时钟
 调用 policy.onnx
 得到 12 维 action
 转换成目标关节位置并应用候选 YAML 的可选校准
@@ -636,9 +825,11 @@ source install/ros2/setup.bash
 ros2 launch custom_dog_description display.launch.py
 ```
 
-当前 `custom_dog_hardware` 和 `custom_dog_controller` 是接口骨架，尚未完成真实
-GOM-8010-6 协议。`config/hardware.yaml` 中的端口、ID、方向和零点都是待标定值，
-`validated: false` 时禁止启动实机策略。
+`custom_dog_controller` 已提供与仿真一致、经过 C++ 单元测试的
+`Passive -> FixStand -> PolicyHold -> Velocity` 状态机核心；它从实测关节角开始 2 秒
+五次插值，并在放行 `vx/vy/wz` 前让 policy 零速接管 1 秒。`custom_dog_hardware` 仍是接口
+骨架，尚未完成真实 GOM-8010-6 协议。`config/hardware.yaml` 中的端口、ID、方向和零点
+都是待标定值，`validated: false` 时禁止启动实机策略。
 
 `qr_ws` 驱动已经确认其上层 `Kp/Kd` 是关节侧参数，写入 GOM-8010-6 前按传动比
 平方换算。当前 RL 的固定值为：
@@ -673,16 +864,23 @@ metadata.yaml
 sha256sums.txt
 ```
 
-Orin NX 上的控制链路：
+Orin NX 上的控制链路和状态机：
 
 ```text
-RS485 读取 12 个电机状态和 IMU
--> 构造 45 维 observation
+Prone/Passive
+-> 从实测关节角到 HOME 的 2 秒五次曲线 FixStand
+-> policy 接管，保持 1 秒零速度
+-> Velocity 接收 vx/vy/wz
+-> RS485 读取 12 个电机状态和 IMU
+-> 按 deploy.yaml 构造 45 或 47 维 observation
 -> ONNX/TensorRT 推理
 -> default_position + action_scale * action
 -> 关节限位、速度限制、温度检查
 -> 四路 RS485 发送目标位置、Kp、Kd
 ```
+
+RL policy 只负责站稳后的速度控制，不使用趴姿 observation，也不输出起身动作。47 维
+phase policy 的最后两个输入仅在 Velocity 状态中提供步态周期，不改变上述恢复状态机。
 
 实机开放顺序固定为：
 
@@ -763,3 +961,7 @@ CUSTOM_DOG_MAX_ITERATIONS=5000 \
 - [策略接口契约](docs/policy_contract.md)
 - [鲁棒微调与 sim2sim 报告](docs/robust_finetune_report_2026-08-08.md)
 - [0~3 m/s 速度与偏航 sim2sim 报告](docs/speed_straight_report_2026-08-09.md)
+- [Omni45 Usage-v1 第一阶段训练报告](reports/omni45_usage_v1_training_report.md)
+- [Omni45 Usage-v1 冻结候选](deploy/candidates/omni45_usage_v1_model_4840/README.md)
+- [Omni45 Usage Stage-2 试验报告](reports/omni45_usage_stage2_report.md)
+- [Omni47 线速度反馈消融报告](reports/omni47_velocity_feedback_ablation.md)

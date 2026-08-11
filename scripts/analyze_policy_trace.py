@@ -26,9 +26,25 @@ def maximum_error(name: str, actual: np.ndarray, expected: np.ndarray) -> float:
 
 
 def observation_term(values: np.ndarray, cfg: dict[str, object]) -> np.ndarray:
-    lower, upper = cfg["clip"]
     scale = np.asarray(cfg["scale"])
+    clip = cfg.get("clip")
+    if clip is None:
+        return values * scale
+    lower, upper = clip
     return np.clip(values, lower, upper) * scale
+
+
+def stack_history(values: np.ndarray, history_length: int) -> np.ndarray:
+    """Flatten per-term history oldest-to-newest using Isaac Lab startup fill."""
+
+    if values.ndim != 2 or values.shape[0] == 0:
+        raise ValueError(f"History source must be a non-empty matrix, got {values.shape}")
+    if history_length < 1:
+        raise ValueError(f"history_length must be positive, got {history_length}")
+    row_indices = np.arange(values.shape[0])[:, np.newaxis]
+    delays = np.arange(history_length - 1, -1, -1)[np.newaxis, :]
+    indices = np.maximum(row_indices - delays, 0)
+    return values[indices].reshape(values.shape[0], history_length * values.shape[1])
 
 
 def policy_command(raw_command: np.ndarray, cfg: dict[str, object]) -> np.ndarray:
@@ -38,22 +54,26 @@ def policy_command(raw_command: np.ndarray, cfg: dict[str, object]) -> np.ndarra
     calibration_root = cfg.get("command_calibration") or {}
     if not isinstance(calibration_root, dict):
         raise ValueError("command_calibration must be a mapping")
-    calibration = calibration_root.get("lin_vel_x")
-    if calibration is None:
-        return result
-    requested = np.asarray(calibration["requested"], dtype=np.float64)
-    policy = np.asarray(calibration["policy"], dtype=np.float64)
-    if (
-        requested.ndim != 1
-        or requested.size < 2
-        or policy.shape != requested.shape
-        or not np.isfinite(requested).all()
-        or not np.isfinite(policy).all()
-        or np.any(np.diff(requested) <= 0.0)
-        or np.any(np.diff(policy) < 0.0)
-    ):
-        raise ValueError("Invalid command_calibration.lin_vel_x configuration")
-    result[:, 0] = np.interp(result[:, 0], requested, policy)
+    for index, name in enumerate(("lin_vel_x", "lin_vel_y", "ang_vel_z")):
+        calibration = calibration_root.get(name)
+        if calibration is None:
+            continue
+        requested = np.asarray(calibration["requested"], dtype=np.float64)
+        policy = np.asarray(calibration["policy"], dtype=np.float64)
+        if (
+            requested.ndim != 1
+            or requested.size < 2
+            or policy.shape != requested.shape
+            or not np.isfinite(requested).all()
+            or not np.isfinite(policy).all()
+            or np.any(np.diff(requested) <= 0.0)
+            or np.any(np.diff(policy) < 0.0)
+        ):
+            raise ValueError(f"Invalid command_calibration.{name} configuration")
+        zero_indices = np.flatnonzero(np.isclose(requested, 0.0, atol=1.0e-12))
+        if zero_indices.size != 1 or not np.isclose(policy[zero_indices[0]], 0.0, atol=1.0e-12):
+            raise ValueError(f"command_calibration.{name} must map zero request to zero")
+        result[:, index] = np.interp(result[:, index], requested, policy)
     return result
 
 
@@ -82,19 +102,40 @@ def main() -> None:
     with deploy_path.open(encoding="utf-8") as stream:
         cfg = yaml.safe_load(stream)
 
-    obs = columns(rows, "obs", 45).astype(np.float32)
+    obs_cfg = cfg["observations"]
+    observation_dim = sum(
+        len(term["scale"]) * int(term.get("history_length", 1))
+        for term in obs_cfg.values()
+    )
+    obs = columns(rows, "obs", observation_dim).astype(np.float32)
     action = columns(rows, "action", 12)
     target = columns(rows, "target_q", 12)
     joint_q = columns(rows, "joint_q", 12)
     joint_dq = columns(rows, "joint_dq", 12)
     ang_vel = columns(rows, "ang_vel", 3)
     gravity = columns(rows, "projected_gravity", 3)
+    base_lin_vel = (
+        columns(rows, "base_lin_vel", 3)
+        if "base_lin_vel_xy" in obs_cfg
+        else None
+    )
 
-    obs_cfg = cfg["observations"]
     default_q = np.asarray(cfg["default_joint_pos"], dtype=np.float64)
+    command_cfg = cfg["commands"]["base_velocity"]
+    external_ranges = command_cfg.get("external_ranges", command_cfg["ranges"])
     raw_command = np.broadcast_to(np.asarray(args.expected_command), (len(rows), 3))
+    range_values = np.asarray(
+        [
+            external_ranges["lin_vel_x"],
+            external_ranges["lin_vel_y"],
+            external_ranges["ang_vel_z"],
+        ],
+        dtype=np.float64,
+    )
+    if np.any(raw_command[0] < range_values[:, 0]) or np.any(raw_command[0] > range_values[:, 1]):
+        raise ValueError(f"Expected command is outside external_ranges: {args.expected_command}")
     calibrated_command = policy_command(raw_command, cfg)
-    expected_terms = {
+    raw_terms = {
         "base_ang_vel": observation_term(ang_vel, obs_cfg["base_ang_vel"]),
         "projected_gravity": observation_term(gravity, obs_cfg["projected_gravity"]),
         "velocity_commands": observation_term(
@@ -109,15 +150,36 @@ def main() -> None:
             obs_cfg["last_action"],
         ),
     }
-    term_slices = {
-        "base_ang_vel": slice(0, 3),
-        "projected_gravity": slice(3, 6),
-        "velocity_commands": slice(6, 9),
-        "joint_pos_rel": slice(9, 21),
-        "joint_vel_rel": slice(21, 33),
-        "last_action": slice(33, 45),
+    if "gait_phase" in obs_cfg:
+        phase_cfg = obs_cfg["gait_phase"]["params"]
+        period = float(phase_cfg["period"])
+        threshold = float(phase_cfg.get("command_threshold", 0.1))
+        phase = np.arange(len(rows), dtype=np.float64) * float(cfg["step_dt"]) / period
+        gait_phase = np.column_stack(
+            (np.sin(phase * 2.0 * np.pi), np.cos(phase * 2.0 * np.pi))
+        )
+        gait_phase[np.linalg.norm(calibrated_command, axis=1) <= threshold] = 0.0
+        raw_terms["gait_phase"] = observation_term(gait_phase, obs_cfg["gait_phase"])
+    if "base_lin_vel_xy" in obs_cfg:
+        assert base_lin_vel is not None
+        raw_terms["base_lin_vel_xy"] = observation_term(
+            base_lin_vel[:, :2], obs_cfg["base_lin_vel_xy"]
+        )
+
+    expected_terms = {
+        name: stack_history(raw_terms[name], int(term.get("history_length", 1)))
+        for name, term in obs_cfg.items()
     }
+    term_slices: dict[str, slice] = {}
+    offset = 0
+    for name, values in expected_terms.items():
+        term_slices[name] = slice(offset, offset + values.shape[1])
+        offset += values.shape[1]
     expected_obs = np.concatenate(list(expected_terms.values()), axis=1)
+    if expected_obs.shape[1] != observation_dim:
+        raise ValueError(
+            f"Expected observation width {observation_dim}, got {expected_obs.shape[1]}"
+        )
 
     action_cfg = cfg["actions"]["JointPositionAction"]
     expected_target = (
@@ -165,7 +227,8 @@ def main() -> None:
         "processed target": maximum_error("processed target", target, expected_target),
     }
     print(
-        f"rows={len(rows)}, command_mean={np.mean(obs[:, 6:9], axis=0).tolist()}, "
+        f"rows={len(rows)}, command_mean="
+        f"{np.mean(obs[:, term_slices['velocity_commands']], axis=0).tolist()}, "
         f"max_abs_action={float(np.max(np.abs(action))):.6g}"
     )
     failed = [name for name, error in errors.items() if error > args.tolerance]

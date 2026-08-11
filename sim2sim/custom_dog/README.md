@@ -50,12 +50,57 @@ cd /home/hsc/custom_dog_stack
 ./scripts/teleop_mujoco_policy.sh
 ```
 
-窗口获得焦点后：`1`、`P` 或空格进入 Passive（零力矩）；`2` 或 `R` 从当前关节角在
-1 秒内插值到 home 站立位；`3` 或 `V` 启用 ONNX Velocity 模式。`W`/`S` 以每次
+从实测趴姿启动并观看完整状态机：
+
+```bash
+CUSTOM_DOG_INITIAL_STATE=prone ./scripts/teleop_mujoco_policy.sh
+```
+
+窗口获得焦点后：`P` 进入 Passive（零力矩）；`R` 从当前关节角按默认 2 秒五次曲线
+插值到 home，随后自动交给零速度 ONNX PolicyHold；确认站稳后按 `V` 释放键盘速度指令。
+`W`/`S` 以每次
 `0.1 m/s` 调整前进速度，`A`/`D` 调整侧向速度，`Q`/`E` 调整偏航角速度，`X` 清零。
-当前直行候选的侧向和偏航训练范围为零，因此它们不会产生运动；该候选只应使用前进速度。
+默认加载 `model_800_omni_stability_calibrated`，其已验证外部范围为
+`vx=0~0.6 m/s`、`vy=+/-0.17 m/s`、`yaw=+/-0.6 rad/s`。
+
+窗口默认使用 MuJoCo tracking camera，持续以 `base` 为中心跟随机器人平移；鼠标仍可
+调整距离、方位角和俯仰角。需要完全自由视角时运行：
+
+```bash
+CUSTOM_DOG_CAMERA_MODE=free ./scripts/teleop_mujoco_policy.sh
+```
+
+不要用 `Space` 或数字键切换机器人状态：MuJoCo 自己将 `Space` 用作播放/暂停，将
+`0..5` 用作几何显示分组。终端出现 `interactive mode=policy_hold` 才表示起身插值已经
+完成并由零速度策略接管；出现 `interactive mode=velocity` 后速度按键才会真正生效。
+进入 `P` 或 `R` 会自动清零旧的三轴命令，防止再次进入 Velocity 时突然起步。
+在 Passive、FixStand 或 PolicyHold 中按速度键会被忽略。
 
 这是 Python MuJoCo 的仿真调试入口，不会通过 ROS 2 或 RS485 下发任何实机指令。
+
+恢复策略验收时，使用训练中相同的折叠初态：hip=`0 deg`、thigh=`71 deg`、
+calf=`-161 deg`。
+
+```bash
+./scripts/run_sim2sim.sh \
+  --policy logs/rsl_rl/custom_dog_velocity/<run>/exported/policy.onnx \
+  --deploy-yaml logs/rsl_rl/custom_dog_velocity/<run>/params/deploy.yaml \
+  --command 0.0 0.0 0.0 \
+  --initial-state prone --recovery-ramp 2.0 --recovery-hold 1.0 \
+  --duration 15 --warmup 3 --viewer
+```
+
+控制器先用五次平滑曲线在 `--recovery-ramp 2.0` 秒内从实测趴姿移动到当前候选
+`deploy.yaml` 的 `default_joint_pos`（映射为 SDK 电机顺序），
+随后让 policy 接管并保持零速度 `--recovery-hold 1.0` 秒，最后释放 `--command` 指定的
+`vx/vy/yaw`。这样可以避免从趴姿直接交给 ONNX 时出现大幅关节目标跳变。
+
+这是固定的职责边界：趴下到站立完全属于部署状态机，RL policy 不负责起身。phase
+候选额外使用的 `sin/cos` 只是在 Velocity 状态中提供步态时钟，不参与五次曲线站立。
+
+输出的 `recovery` 行要求至少出现一次 `height >= 0.25 m` 且 `tilt <= 15 deg`，并会
+报告过渡期间的最大高度、倾角、实际执行器力和关节速度。这只是仿真验收门槛；实机状态机
+必须实现同一条平滑曲线，并从悬空、低增益、急停可用的条件开始测试。
 
 ## 加载 ONNX 策略
 
@@ -71,12 +116,35 @@ cd /home/hsc/custom_dog_stack
 ```
 
 控制器严格使用 `deploy.yaml` 中的 observation 顺序、缩放、动作 offset/scale、
-`joint_ids_map` 和 `step_dt`。当前模型的 MuJoCo 步长为 0.005 秒，策略每四个仿真步
+`joint_ids_map`、每关节 Kp/Kd 和 `step_dt`。runner 会把 YAML 增益写入 MuJoCo
+position actuator，并用同一组增益计算 torque-speed 限幅。当前模型的 MuJoCo 步长为 0.005 秒，策略每四个仿真步
 执行一次，即 50 Hz。
 
-若 YAML 声明 `command_calibration.lin_vel_x`，`--command` 是外部 requested speed，
-控制器会把它插值为 observation 中的 policy speed；输出指标仍与 requested speed
-比较，并同时打印 `policy_vx`。这张表是显式的模型校准，移植到 C++/ROS 2 时必须保持一致。
+Runner 同时支持 45 维基础 observation，以及在末尾追加 `gait_phase` 或
+`base_lin_vel_xy` 的两种 47 维契约。具体扩展必须由 YAML 中的 term 名称区分。
+`base_lin_vel_xy` 在 MuJoCo 中由浮动基座世界速度旋转到机身坐标系得到。
+
+若 YAML 声明 `command_calibration`，`--command` 是外部 requested command，控制器会
+分别插值 `lin_vel_x`、`lin_vel_y` 和 `ang_vel_z`，再写入 observation。输出指标仍与
+requested command 比较，并同时打印三轴 `policy_command`。`external_ranges` 限制外部请求，
+`policy_ranges` 限制校准后网络输入；移植到 C++/ROS 2 时必须实现相同逻辑。
+
+使用一条 MuJoCo 进程验证动态指令切换：
+
+```bash
+./scripts/run_sim2sim.sh \
+  --policy deploy/candidates/model_800_omni_stability_calibrated/exported/policy.onnx \
+  --deploy-yaml deploy/candidates/model_800_omni_stability_calibrated/params/deploy.yaml \
+  --duration 32 --warmup 0.5 \
+  --command-step 0 0 0 0 \
+  --command-step 5 0.3 0 0 \
+  --command-step 12 0 0.15 0 \
+  --command-step 19 0 0 0.4 \
+  --command-step 25 0.5 0.15 0.4
+```
+
+每个 `--command-step` 是 `TIME VX VY YAW`，首项必须从 0 秒开始。输出会分别报告各段
+requested command、policy command、实测速度和误差。
 
 当前速度候选的复现命令：
 

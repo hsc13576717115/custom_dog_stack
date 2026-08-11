@@ -20,4 +20,12 @@ python3 -m py_compile \
     "${project_root}/sim2sim/unitree_deploy/prepare_controller.py" \
     "${project_root}/scripts/analyze_policy_trace.py"
 
+state_machine_test="$(mktemp /tmp/custom_dog_state_machine_test.XXXXXX)"
+trap 'rm -f "${state_machine_test}"' EXIT
+"${CXX:-c++}" -std=c++17 -Wall -Wextra -Wpedantic -Werror \
+    -I"${project_root}/ros2/src/custom_dog_controller/include" \
+    "${project_root}/ros2/src/custom_dog_controller/test/deployment_state_machine_test.cpp" \
+    -o "${state_machine_test}"
+"${state_machine_test}"
+
 echo "Static validation passed."

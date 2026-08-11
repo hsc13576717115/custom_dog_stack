@@ -99,3 +99,13 @@ CUSTOM_DOG_CFG = UnitreeArticulationCfg(
         "RL_calf_joint",
     ],
 )
+
+
+# Keep historical checkpoints on their original +/-0.1 rad hip offsets.  The
+# compact variant changes only the nominal standing/action offset; motor gains,
+# limits and all physical parameters remain identical to CUSTOM_DOG_CFG.
+CUSTOM_DOG_COMPACT_HIP_CFG = CUSTOM_DOG_CFG.copy()
+CUSTOM_DOG_COMPACT_HIP_CFG.init_state = CUSTOM_DOG_CFG.init_state.copy()
+CUSTOM_DOG_COMPACT_HIP_CFG.init_state.joint_pos = dict(CUSTOM_DOG_CFG.init_state.joint_pos)
+CUSTOM_DOG_COMPACT_HIP_CFG.init_state.joint_pos[".*R_hip_joint"] = -0.05
+CUSTOM_DOG_COMPACT_HIP_CFG.init_state.joint_pos[".*L_hip_joint"] = 0.05
