@@ -2,12 +2,17 @@
 set -euo pipefail
 
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-conda_exe="${CONDA_EXE:-/home/hsc/miniconda3/bin/conda}"
+conda_exe="${CONDA_EXE:-$(command -v conda 2>/dev/null || true)}"
 env_name="${CUSTOM_DOG_MUJOCO_ENV:-custom_dog_mujoco}"
 model_dir="${project_root}/sim2sim/custom_dog"
 urdf="${project_root}/ros2/src/custom_dog_description/urdf/custom_dog.urdf"
 mjcf="${model_dir}/custom_dog.xml"
 unitree_mjcf="${model_dir}/custom_dog_unitree.xml"
+
+if [[ -z "${conda_exe}" ]]; then
+    echo "Conda was not found. Set CONDA_EXE or run setup_ubuntu2204.sh." >&2
+    exit 1
+fi
 
 if ! "${conda_exe}" env list | awk '{print $1}' | grep -Fx "${env_name}" >/dev/null; then
     echo "Missing conda environment '${env_name}'. Run ./scripts/setup_mujoco.sh first." >&2

@@ -4,22 +4,27 @@ dependencies:
   isaac_lab:
     repository: https://github.com/isaac-sim/IsaacLab.git
     commit: 3c6e67bb5c7ada942a6d1884ab69338f57596f77
-    local_path: /home/hsc/IsaacLab
+    local_path: third_party/IsaacLab
   unitree_rl_lab:
     repository: https://github.com/unitreerobotics/unitree_rl_lab.git
     commit: 4960b84732b0c2ec593dccbfe963fda1bcd7b1e3
-    local_path: /home/hsc/unitree_rl_lab
+    local_path: third_party/unitree_rl_lab
   unitree_mujoco:
     repository: https://github.com/unitreerobotics/unitree_mujoco.git
     commit: ae6a8403e272733e9996ef59990880330496177f
-    local_path: /home/hsc/unitree_mujoco
+    local_path: third_party/unitree_mujoco
+  unitree_sdk2:
+    repository: https://github.com/unitreerobotics/unitree_sdk2.git
+    commit: 21d0a3b2c46ee48c8fdf2783becb6be3beb0a59b
+    local_path: third_party/unitree_sdk2
   dog_control_reference:
     repository: https://github.com/hsc13576717115/Dog-control.git
     branch: qr_ws
     commit: d4adbbafecd8e60fceb5f820d444090bf3a3e9d5
+    local_path: third_party/Dog-control
 
 runtime:
-  operating_system: Ubuntu 22.04 under WSL 2
+  operating_system: Ubuntu 22.04 x86_64 (native preferred; WSL 2 supported)
   isaac_sim: "5.1"
   python: "3.11"
   pytorch: "2.7.0+cu128"

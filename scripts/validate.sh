@@ -2,9 +2,10 @@
 set -euo pipefail
 
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "${project_root}/scripts/activate_env.sh"
 
-python3 -m unittest discover -s "${project_root}/tests" -v
-python3 -m py_compile \
+python -m pytest -q "${project_root}/tests"
+python -m py_compile \
     "${project_root}/rl/src/custom_dog_rl/assets/custom_dog.py" \
     "${project_root}/rl/src/custom_dog_rl/tasks/locomotion/velocity_env_cfg.py" \
     "${project_root}/rl/src/custom_dog_rl/tasks/locomotion/mdp/commands.py" \

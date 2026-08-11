@@ -1,0 +1,18 @@
+release: omni45-axis4698
+source_candidate: speed_omni_axis45_from4599_4698
+policy_contract_version: "1.2"
+observation_dim: 45
+action_dim: 12
+control_frequency_hz: 50
+command_range:
+  lin_vel_x: [0.0, 3.0]
+  lin_vel_y: [-0.42, 0.42]
+  ang_vel_z: [-0.6, 0.6]
+validated:
+  mujoco_sim2sim: true
+  unitree_mujoco_bridge: false
+  hardware: false
+notes:
+  - Selected as the migration baseline because its forward, lateral and turning behavior was visually acceptable.
+  - Reverse velocity is not supported by this release.
+  - Hip abduction style still requires reward tuning; do not treat this as the final hardware policy.

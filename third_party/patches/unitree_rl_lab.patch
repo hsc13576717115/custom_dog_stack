@@ -1,0 +1,1202 @@
+diff --git a/deploy/include/FSM/CtrlFSM.h b/deploy/include/FSM/CtrlFSM.h
+index 62aacf2..d957504 100644
+--- a/deploy/include/FSM/CtrlFSM.h
++++ b/deploy/include/FSM/CtrlFSM.h
+@@ -69,6 +69,14 @@ public:
+ 
+         states.push_back(std::move(state));
+     }
++
++    void request_state(const std::string& state_string)
++    {
++        if (!FSMStringMap.right.count(state_string)) {
++            throw std::runtime_error("FSM: Unknown requested state " + state_string);
++        }
++        requested_state_.store(FSMStringMap.right.at(state_string));
++    }
+     
+     ~CtrlFSM()
+     {
+@@ -86,8 +94,8 @@ private:
+         currentState->post_run();
+         
+         // Check if need to change state
+-        int nextStateMode = 0;
+-        for(int i(0); i<currentState->registered_checks.size(); i++)
++        int nextStateMode = requested_state_.exchange(0);
++        for(int i(0); nextStateMode == 0 && i<currentState->registered_checks.size(); i++)
+         {
+             if(currentState->registered_checks[i].first())
+             {
+@@ -114,4 +122,5 @@ private:
+ 
+     std::shared_ptr<BaseState> currentState;
+     unitree::common::RecurrentThreadPtr fsm_thread_;
+-};
+\ No newline at end of file
++    std::atomic<int> requested_state_{0};
++};
+diff --git a/deploy/include/FSM/State_FixStand.h b/deploy/include/FSM/State_FixStand.h
+index 6c7a783..f7959e7 100644
+--- a/deploy/include/FSM/State_FixStand.h
++++ b/deploy/include/FSM/State_FixStand.h
+@@ -34,7 +34,9 @@ public:
+         // set initial position
+         std::vector<float> q0;
+         for(int i(0); i < kp.size(); ++i) {
+-            q0.push_back(lowcmd->msg_.motor_cmd()[i].q());
++            // Start the interpolation from measured joint state. lowcmd is
++            // not initialized on a fresh DDS connection and may contain 0.
++            q0.push_back(lowstate->msg_.motor_state()[i].q());
+         }
+         qs_[0] = q0;
+         t0_ = (double)unitree::common::GetCurrentTimeMillisecond() * 1e-3;
+@@ -56,4 +58,4 @@ private:
+     std::vector<std::vector<float>> qs_;
+ };
+ 
+-REGISTER_FSM(State_FixStand)
+\ No newline at end of file
++REGISTER_FSM(State_FixStand)
+diff --git a/deploy/include/FSM/State_RLBase.h b/deploy/include/FSM/State_RLBase.h
+index 059a62f..78ef36a 100644
+--- a/deploy/include/FSM/State_RLBase.h
++++ b/deploy/include/FSM/State_RLBase.h
+@@ -6,6 +6,11 @@
+ #include "FSMState.h"
+ #include "isaaclab/envs/mdp/actions/joint_actions.h"
+ #include "isaaclab/envs/mdp/terminations.h"
++#include <atomic>
++#include <chrono>
++#include <cstdlib>
++#include <fstream>
++#include <iomanip>
+ 
+ class State_RLBase : public FSMState
+ {
+@@ -14,6 +19,25 @@ public:
+     
+     void enter()
+     {
++        const char* trace_path = std::getenv("UNITREE_RL_POLICY_TRACE");
++        if (trace_path != nullptr && trace_path[0] != '\0')
++        {
++            trace_stream.open(trace_path, std::ios::out | std::ios::trunc);
++            if (!trace_stream.is_open()) {
++                throw std::runtime_error(std::string("Could not open policy trace: ") + trace_path);
++            }
++            trace_stream << std::setprecision(9);
++            trace_header_written = false;
++        }
++
++        transition_q.clear();
++        transition_q.reserve(env->robot->data.joint_ids_map.size());
++        for (size_t i = 0; i < env->robot->data.joint_ids_map.size(); ++i) {
++            const int sdk_id = static_cast<int>(env->robot->data.joint_ids_map[i]);
++            transition_q.push_back(lowstate->msg_.motor_state()[sdk_id].q());
++        }
++        transition_started_at = std::chrono::steady_clock::now();
++
+         // set gain
+         for (int i = 0; i < env->robot->data.joint_stiffness.size(); ++i)
+         {
+@@ -38,6 +62,7 @@ public:
+             while (policy_thread_running)
+             {
+                 env->step();
++                write_policy_trace();
+ 
+                 // Sleep
+                 std::this_thread::sleep_until(sleepTill);
+@@ -54,13 +79,83 @@ public:
+         if (policy_thread.joinable()) {
+             policy_thread.join();
+         }
++        if (trace_stream.is_open()) {
++            trace_stream.close();
++        }
+     }
+ 
+ private:
++    static void write_columns(std::ofstream& stream, const std::string& prefix, size_t count)
++    {
++        for (size_t i = 0; i < count; ++i) {
++            stream << ',' << prefix << '_' << i;
++        }
++    }
++
++    static void write_values(std::ofstream& stream, const std::vector<float>& values)
++    {
++        for (float value : values) {
++            stream << ',' << value;
++        }
++    }
++
++    static void write_values(std::ofstream& stream, const Eigen::VectorXf& values)
++    {
++        for (Eigen::Index i = 0; i < values.size(); ++i) {
++            stream << ',' << values[i];
++        }
++    }
++
++    static void write_values(std::ofstream& stream, const Eigen::Vector3f& values)
++    {
++        for (Eigen::Index i = 0; i < values.size(); ++i) {
++            stream << ',' << values[i];
++        }
++    }
++
++    void write_policy_trace()
++    {
++        if (!trace_stream.is_open()) {
++            return;
++        }
++
++        const auto targets = env->action_manager->processed_actions();
++        const auto& data = env->robot->data;
++        if (!trace_header_written)
++        {
++            trace_stream << "step,time_s";
++            write_columns(trace_stream, "obs", env->last_observation.size());
++            write_columns(trace_stream, "action", env->last_action.size());
++            write_columns(trace_stream, "target_q", targets.size());
++            write_columns(trace_stream, "joint_q", data.joint_pos.size());
++            write_columns(trace_stream, "joint_dq", data.joint_vel.size());
++            write_columns(trace_stream, "ang_vel", data.root_ang_vel_b.size());
++            write_columns(trace_stream, "projected_gravity", data.projected_gravity_b.size());
++            trace_stream << '\n';
++            trace_header_written = true;
++        }
++
++        trace_stream << env->episode_length << ',' << env->episode_length * env->step_dt;
++        write_values(trace_stream, env->last_observation);
++        write_values(trace_stream, env->last_action);
++        write_values(trace_stream, targets);
++        write_values(trace_stream, data.joint_pos);
++        write_values(trace_stream, data.joint_vel);
++        write_values(trace_stream, data.root_ang_vel_b);
++        write_values(trace_stream, data.projected_gravity_b);
++        trace_stream << '\n';
++        trace_stream.flush();
++    }
++
+     std::unique_ptr<isaaclab::ManagerBasedRLEnv> env;
+ 
+     std::thread policy_thread;
+-    bool policy_thread_running = false;
++    std::atomic<bool> policy_thread_running{false};
++    std::ofstream trace_stream;
++    bool trace_header_written = false;
++    float transition_duration = 0.0f;
++    std::vector<float> transition_q;
++    std::chrono::steady_clock::time_point transition_started_at;
+ };
+ 
+ REGISTER_FSM(State_RLBase)
+diff --git a/deploy/include/isaaclab/envs/manager_based_rl_env.h b/deploy/include/isaaclab/envs/manager_based_rl_env.h
+index 03316bf..0e59e1c 100644
+--- a/deploy/include/isaaclab/envs/manager_based_rl_env.h
++++ b/deploy/include/isaaclab/envs/manager_based_rl_env.h
+@@ -54,6 +54,8 @@ public:
+         robot->update();
+         action_manager->reset();
+         observation_manager->reset();
++        last_observation.clear();
++        last_action.clear();
+     }
+ 
+     void step()
+@@ -63,6 +65,8 @@ public:
+         auto obs = observation_manager->compute();
+         auto action = alg->act(obs);
+         action_manager->process_action(action);
++        last_observation = obs.at("obs");
++        last_action = std::move(action);
+     }
+ 
+     float step_dt;
+@@ -75,6 +79,8 @@ public:
+     std::unique_ptr<Algorithms> alg;
+     long episode_length = 0;
+     float global_phase = 0.0f;
++    std::vector<float> last_observation;
++    std::vector<float> last_action;
+ };
+ 
+-};
+\ No newline at end of file
++};
+diff --git a/deploy/include/isaaclab/envs/mdp/actions/joint_actions.h b/deploy/include/isaaclab/envs/mdp/actions/joint_actions.h
+index 23f280d..46ccf82 100644
+--- a/deploy/include/isaaclab/envs/mdp/actions/joint_actions.h
++++ b/deploy/include/isaaclab/envs/mdp/actions/joint_actions.h
+@@ -78,6 +78,14 @@ public:
+     void reset()
+     {
+         _raw_actions.assign(_action_dim, 0.0f);
++        // A fresh FSM state must hold the policy default pose until the first
++        // inference result is available. Leaving processed actions at zero
++        // sends q=0 for one control window and can destabilize a custom dog.
++        if(!_offset.empty()) {
++            _processed_actions = _offset;
++        } else {
++            _processed_actions.assign(_action_dim, 0.0f);
++        }
+     }
+ 
+ protected:
+@@ -114,4 +122,4 @@ public:
+ REGISTER_ACTION(JointPositionAction);
+ REGISTER_ACTION(JointVelocityAction);
+ 
+-};
+\ No newline at end of file
++};
+diff --git a/deploy/include/isaaclab/manager/action_manager.h b/deploy/include/isaaclab/manager/action_manager.h
+index 4c1fe10..a086895 100644
+--- a/deploy/include/isaaclab/manager/action_manager.h
++++ b/deploy/include/isaaclab/manager/action_manager.h
+@@ -5,6 +5,7 @@
+ 
+ #include "isaaclab/envs/manager_based_rl_env.h"
+ #include "isaaclab/manager/manager_term_cfg.h"
++#include <mutex>
+ #include <numeric>
+ 
+ namespace isaaclab
+@@ -52,6 +53,7 @@ public:
+ 
+     void reset()
+     {
++        std::lock_guard<std::mutex> lock(action_mutex_);
+         _action.assign(total_action_dim(), 0.0f);
+         for(auto & term : _terms)
+         {
+@@ -61,11 +63,13 @@ public:
+ 
+     std::vector<float> action()
+     {
++        std::lock_guard<std::mutex> lock(action_mutex_);
+         return _action;
+     }
+ 
+     std::vector<float> processed_actions()
+     {
++        std::lock_guard<std::mutex> lock(action_mutex_);
+         std::vector<float> actions;
+         for(auto & term : _terms)
+         {
+@@ -77,6 +81,7 @@ public:
+ 
+     void process_action(std::vector<float> action)
+     {
++        std::lock_guard<std::mutex> lock(action_mutex_);
+         _action = action;
+         int idx = 0;
+         for(auto & term : _terms)
+@@ -125,6 +130,7 @@ private:
+ 
+     std::vector<float> _action;
+     std::vector<std::unique_ptr<ActionTerm>> _terms;
++    std::mutex action_mutex_;
+ };
+ 
+-};
+\ No newline at end of file
++};
+diff --git a/deploy/include/param.h b/deploy/include/param.h
+index dae4bb4..9bf4c49 100644
+--- a/deploy/include/param.h
++++ b/deploy/include/param.h
+@@ -129,7 +129,9 @@ inline po::variables_map helper(int argc, char** argv)
+         ("help,h", "produce help message")
+         ("version,v", "show version")
+         ("log", "record log file")
++        ("domain,d", po::value<int>()->default_value(0), "dds domain id")
+         ("network,n", po::value<std::string>()->default_value(""), "dds network interface")
++        ("auto-start", po::bool_switch()->default_value(false), "simulation only: stand, then start policy")
+         ;
+ 
+     po::variables_map vm;
+@@ -161,4 +163,4 @@ inline po::variables_map helper(int argc, char** argv)
+     return vm;
+ }
+ 
+-}
+\ No newline at end of file
++}
+diff --git a/deploy/robots/go2/CMakeLists.txt b/deploy/robots/go2/CMakeLists.txt
+index 0e60ebe..404d2a3 100644
+--- a/deploy/robots/go2/CMakeLists.txt
++++ b/deploy/robots/go2/CMakeLists.txt
+@@ -3,20 +3,25 @@ project(go2_controller)
+ 
+ find_package(Boost REQUIRED COMPONENTS program_options)
+ find_package(yaml-cpp REQUIRED)
++find_package(fmt REQUIRED)
++
++set(UNITREE_SDK_PREFIX "/home/hsc/.local/unitree_robotics" CACHE PATH "Unitree SDK2 install prefix")
++list(APPEND CMAKE_PREFIX_PATH "${UNITREE_SDK_PREFIX}/lib/cmake")
++find_package(unitree_sdk2 REQUIRED)
+ 
+ include_directories(
+   /usr/include/eigen3
+-  /usr/local/include/ddscxx # dds
+-  /usr/local/include/iceoryx/v2.0.2 # dds
++  ${UNITREE_SDK_PREFIX}/include
++  ${UNITREE_SDK_PREFIX}/include/ddscxx
+   include
+   ${PROJECT_SOURCE_DIR}/../../thirdparty/onnxruntime-linux-x64-1.22.0/include
+   ${PROJECT_SOURCE_DIR}/../../include/
+ )
+ 
+ link_libraries(
+-  unitree_sdk2 ddsc ddscxx rt pthread # dds
+-  libboost_program_options.a libyaml-cpp.a fmt
+-  ${PROJECT_SOURCE_DIR}/../../thirdparty/onnxruntime-linux-x64-1.22.0/lib/libonnxruntime.so
++  unitree_sdk2 rt pthread
++  Boost::program_options yaml-cpp fmt::fmt
++  ${PROJECT_SOURCE_DIR}/../../thirdparty/onnxruntime-linux-x64-1.22.0/lib/libonnxruntime.so.1.22.0
+ )
+ 
+ file(GLOB_RECURSE ADD_SRC_LIST
+@@ -26,4 +31,4 @@ file(GLOB_RECURSE ADD_SRC_LIST
+ add_library(${PROJECT_NAME}_lib ${ADD_SRC_LIST})
+ link_libraries(${PROJECT_NAME}_lib)
+ 
+-add_executable(go2_ctrl main.cpp)
+\ No newline at end of file
++add_executable(go2_ctrl main.cpp)
+diff --git a/deploy/robots/go2/main.cpp b/deploy/robots/go2/main.cpp
+index ffd8159..7defed5 100644
+--- a/deploy/robots/go2/main.cpp
++++ b/deploy/robots/go2/main.cpp
+@@ -29,11 +29,18 @@ int main(int argc, char** argv)
+     // Load parameters
+     auto vm = param::helper(argc, argv);
+ 
++    if (vm["auto-start"].as<bool>() && vm["domain"].as<int>() == 0)
++    {
++        throw std::runtime_error("--auto-start is disabled for DDS domain 0 (real robot safety guard).");
++    }
++
+     std::cout << " --- Unitree Robotics --- \n";
+     std::cout << "     Go2 Controller \n";
+ 
+     // Unitree DDS Config
+-    unitree::robot::ChannelFactory::Instance()->Init(0, vm["network"].as<std::string>());
++    unitree::robot::ChannelFactory::Instance()->Init(
++        vm["domain"].as<int>(), vm["network"].as<std::string>()
++    );
+ 
+     init_fsm_state();
+ 
+@@ -41,6 +48,13 @@ int main(int argc, char** argv)
+     auto fsm = std::make_unique<CtrlFSM>(param::config["FSM"]);
+     fsm->start();
+ 
++    if (vm["auto-start"].as<bool>())
++    {
++        fsm->request_state("FixStand");
++        sleep(3);
++        fsm->request_state("Velocity");
++    }
++
+     std::cout << "Press [L2 + A] to enter FixStand mode.\n";
+     std::cout << "And then press [Start] to start controlling the robot.\n";
+ 
+@@ -51,4 +65,3 @@ int main(int argc, char** argv)
+     
+     return 0;
+ }
+-
+diff --git a/deploy/robots/go2/src/State_RLBase.cpp b/deploy/robots/go2/src/State_RLBase.cpp
+index 4f021be..0ae5de9 100644
+--- a/deploy/robots/go2/src/State_RLBase.cpp
++++ b/deploy/robots/go2/src/State_RLBase.cpp
+@@ -7,6 +7,7 @@ State_RLBase::State_RLBase(int state_mode, std::string state_string)
+ : FSMState(state_mode, state_string) 
+ {
+     auto cfg = param::config["FSM"][state_string];
++    transition_duration = cfg["transition_duration"].as<float>(0.0f);
+     auto policy_dir = param::parser_policy_dir(cfg["policy_dir"].as<std::string>());
+ 
+     env = std::make_unique<isaaclab::ManagerBasedRLEnv>(
+@@ -26,7 +27,15 @@ State_RLBase::State_RLBase(int state_mode, std::string state_string)
+ void State_RLBase::run()
+ {
+     auto action = env->action_manager->processed_actions();
++    float blend = 1.0f;
++    if (transition_duration > 0.0f) {
++        const auto elapsed = std::chrono::duration<float>(
++            std::chrono::steady_clock::now() - transition_started_at
++        ).count();
++        blend = std::clamp(elapsed / transition_duration, 0.0f, 1.0f);
++    }
+     for(int i(0); i < env->robot->data.joint_ids_map.size(); i++) {
+-        lowcmd->msg_.motor_cmd()[env->robot->data.joint_ids_map[i]].q() = action[i];
++        const float target = transition_q[i] + blend * (action[i] - transition_q[i]);
++        lowcmd->msg_.motor_cmd()[env->robot->data.joint_ids_map[i]].q() = target;
+     }
+-}
+\ No newline at end of file
++}
+diff --git a/scripts/list_envs.py b/scripts/list_envs.py
+index 5324af9..ae893f9 100644
+--- a/scripts/list_envs.py
++++ b/scripts/list_envs.py
+@@ -87,7 +87,7 @@ def main():
+     index = 0
+     # acquire all Isaac environments names
+     for task_spec in gym.registry.values():
+-        if "Unitree" in task_spec.id and "Isaac" not in task_spec.id:
++        if ("Unitree" in task_spec.id or task_spec.id.startswith("Custom-")) and "Isaac" not in task_spec.id:
+             # add details to table
+             table.add_row([index + 1, task_spec.id, task_spec.entry_point, task_spec.kwargs["env_cfg_entry_point"]])
+             # increment count
+diff --git a/scripts/rsl_rl/play.py b/scripts/rsl_rl/play.py
+index fd5ff85..d2120fe 100644
+--- a/scripts/rsl_rl/play.py
++++ b/scripts/rsl_rl/play.py
+@@ -23,6 +23,7 @@ parser.add_argument(
+     "--disable_fabric", action="store_true", default=False, help="Disable fabric and use USD I/O operations."
+ )
+ parser.add_argument("--num_envs", type=int, default=None, help="Number of environments to simulate.")
++parser.add_argument("--max_steps", type=int, default=None, help="Stop after this many simulation steps.")
+ parser.add_argument("--task", type=str, default=None, help="Name of the task.")
+ parser.add_argument(
+     "--use_pretrained_checkpoint",
+@@ -172,6 +173,10 @@ def main():
+             # Exit the play loop after recording one video
+             if timestep == args_cli.video_length:
+                 break
++        elif args_cli.max_steps is not None:
++            timestep += 1
++            if timestep >= args_cli.max_steps:
++                break
+ 
+         # time delay for real-time evaluation
+         sleep_time = dt - (time.time() - start_time)
+diff --git a/scripts/rsl_rl/train.py b/scripts/rsl_rl/train.py
+index 28dae91..a2562ae 100644
+--- a/scripts/rsl_rl/train.py
++++ b/scripts/rsl_rl/train.py
+@@ -19,7 +19,7 @@ sys.path.pop(0)
+ 
+ tasks = []
+ for task_spec in gym.registry.values():
+-    if "Unitree" in task_spec.id and "Isaac" not in task_spec.id:
++    if ("Unitree" in task_spec.id or task_spec.id.startswith("Custom-")) and "Isaac" not in task_spec.id:
+         tasks.append(task_spec.id)
+ 
+ import argparse
+@@ -40,6 +40,12 @@ parser.add_argument("--num_envs", type=int, default=None, help="Number of enviro
+ parser.add_argument("--task", type=str, default=None, choices=tasks, help="Name of the task.")
+ parser.add_argument("--seed", type=int, default=None, help="Seed used for the environment")
+ parser.add_argument("--max_iterations", type=int, default=None, help="RL Policy training iterations.")
++parser.add_argument(
++    "--rl_device",
++    type=str,
++    default=None,
++    help="Device used by the RSL-RL policy and PPO optimizer, for example cuda:0 or cpu.",
++)
+ parser.add_argument(
+     "--distributed", action="store_true", default=False, help="Run training with multiple GPUs or nodes."
+ )
+@@ -122,6 +128,8 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
+     """Train with RSL-RL agent."""
+     # override configurations with non-hydra CLI arguments
+     agent_cfg = cli_args.update_rsl_rl_cfg(agent_cfg, args_cli)
++    if args_cli.rl_device is not None:
++        agent_cfg.device = args_cli.rl_device
+     env_cfg.scene.num_envs = args_cli.num_envs if args_cli.num_envs is not None else env_cfg.scene.num_envs
+     agent_cfg.max_iterations = (
+         args_cli.max_iterations if args_cli.max_iterations is not None else agent_cfg.max_iterations
+diff --git a/source/unitree_rl_lab/unitree_rl_lab/assets/robots/unitree.py b/source/unitree_rl_lab/unitree_rl_lab/assets/robots/unitree.py
+index e78413a..7c5c7e6 100644
+--- a/source/unitree_rl_lab/unitree_rl_lab/assets/robots/unitree.py
++++ b/source/unitree_rl_lab/unitree_rl_lab/assets/robots/unitree.py
+@@ -17,8 +17,8 @@ from isaaclab.utils import configclass
+ 
+ from unitree_rl_lab.assets.robots import unitree_actuators
+ 
+-UNITREE_MODEL_DIR = "path/to/unitree_model"  # Replace with the actual path to your unitree_model directory
+-UNITREE_ROS_DIR = "path/to/unitree_ros"  # Replace with the actual path to your unitree_ros package
++UNITREE_MODEL_DIR = "/home/hsc/unitree_model"
++UNITREE_ROS_DIR = "/home/hsc/unitree_ros"
+ 
+ 
+ @configclass
+@@ -93,11 +93,8 @@ class UnitreeUrdfFileCfg(sim_utils.UrdfFileCfg):
+ """ Configuration for the Unitree robots."""
+ 
+ UNITREE_GO2_CFG = UnitreeArticulationCfg(
+-    # spawn=UnitreeUrdfFileCfg(
+-    #     asset_path=f"{UNITREE_ROS_DIR}/robots/go2_description/urdf/go2_description.urdf",
+-    # ),
+-    spawn=UnitreeUsdFileCfg(
+-        usd_path=f"{UNITREE_MODEL_DIR}/Go2/usd/go2.usd",
++    spawn=UnitreeUrdfFileCfg(
++        asset_path=f"{UNITREE_ROS_DIR}/robots/go2_description/urdf/go2_description.urdf",
+     ),
+     init_state=ArticulationCfg.InitialStateCfg(
+         pos=(0.0, 0.0, 0.4),
+diff --git a/CUSTOM_DOG_TRAINING.md b/CUSTOM_DOG_TRAINING.md
+new file mode 100644
+index 0000000..27eb2b7
+--- /dev/null
++++ b/CUSTOM_DOG_TRAINING.md
+@@ -0,0 +1,49 @@
++# Custom Dog Training
++
++The corrected description is loaded from:
++
++```text
++/home/hsc/custom_dog_description/urdf/custom_dog.urdf
++```
++
++The URDF contains 17 links, 16 joints, 12 actuated joints, and a total mass
++of 13.84916 kg.  The mass values are the SolidWorks assembly values supplied
++by the user: base 6.55 kg, each hip 0.65268 kg, each thigh 1.00599 kg, each
++calf 0.11021 kg, and each foot 0.05591 kg.
++
++After accepting the NVIDIA Omniverse EULA, run:
++
++```bash
++cd /home/hsc/unitree_rl_lab
++source activate_env.sh
++export OMNI_KIT_ACCEPT_EULA=YES
++./train_custom_dog_smoke.sh
++```
++
++The smoke run uses one environment and one PPO iteration.  It must create a
++training directory and `model_0.pt`.  A longer WSL run uses CPU PhysX and the
++CUDA device for PPO:
++
++```bash
++cd /home/hsc/unitree_rl_lab
++source activate_env.sh
++export OMNI_KIT_ACCEPT_EULA=YES
++CUSTOM_DOG_NUM_ENVS=128 CUSTOM_DOG_MAX_ITERATIONS=5000 \
++  ./train_custom_dog_wsl_gpu.sh
++```
++
++The custom asset starts at a base height of 0.324 m with all four thigh
++joints at 0.8 rad.  Articulation self-collisions are disabled because the
++current CAD visual meshes overlap around adjacent joint housings; ground
++contacts and illegal base contacts remain enabled.
++
++Export a policy from a checkpoint:
++
++```bash
++./export_custom_dog_policy.sh /absolute/path/to/model_N.pt
++```
++
++The custom actuator configuration models GO-M8010-6 directly on hip/thigh
++and reflects the calf 1:2 transmission by halving speed and doubling output
++torque.  Do not send an exported policy to hardware until encoder zero,
++direction, limits, RS485 IDs, emergency stop, and PD gains are calibrated.
+diff --git a/TRAINING_PIPELINE.md b/TRAINING_PIPELINE.md
+new file mode 100644
+index 0000000..bcc3c60
+--- /dev/null
++++ b/TRAINING_PIPELINE.md
+@@ -0,0 +1,244 @@
++# 本机 WSL 上的 Go2 强化学习训练流程
++
++## 已安装版本
++
++- WSL2 Ubuntu 22.04
++- NVIDIA RTX 4060 Laptop GPU（8 GB 显存）
++- Miniconda 环境：`/home/hsc/miniconda3/envs/env_isaaclab`
++- Isaac Sim 5.1.0
++- Isaac Lab 2.3.0 源码目录：`/home/hsc/IsaacLab`
++- PyTorch 2.7.0 + CUDA 12.8
++- Unitree RL Lab：`/home/hsc/unitree_rl_lab`
++- Unitree MuJoCo 3.3.6：`/home/hsc/unitree_mujoco`
++- Unitree SDK2 用户级安装目录：`/home/hsc/.local/unitree_robotics`
++
++## 已完成的验证
++
++- `nvidia-smi` 和支持 CUDA 的 PyTorch 均能检测到 RTX 4060。
++- `pip check` 未发现损坏或冲突的 Python 依赖。
++- Unitree RL Lab 已成功注册 `Unitree-Go2-Velocity` 任务。
++- Go2 使用 `/home/hsc/unitree_ros` 中的宇树官方本地 URDF。
++- MuJoCo C++ 仿真器已成功编译并加载 Go2 模型，包括 12 个执行器、关节状态传感器、力矩传感器和 IMU 传感器。
++- 宇树官方 `stand_go2` 示例已通过 DDS Domain 1 与 MuJoCo 成功通信。
++- Unitree RL Lab 的 Go2 ONNX 控制器已成功编译，并支持选择 DDS Domain。
++- CPU PhysX + CUDA PPO 混合冒烟训练已完成一次 PPO 更新（24 个样本），并生成 `model_0.pt`。
++- checkpoint 已成功导出并通过 ONNX 模型校验，接口为 `[1, 45] -> [1, 12]`。
++- C++ 控制器已成功加载 ONNX 模型，并完成 MuJoCo DDS 闭环：
++  `Passive -> FixStand -> Velocity`。
++
++## 当前 WSL 的 GPU 使用方式和限制
++
++支持 CUDA 的 PyTorch 可以检测到 RTX 4060，但是 Isaac Sim 无法在当前 WSL 环境中创建其所需的 Linux NVIDIA Vulkan/RTX 设备。日志中显示驱动版本为 0，并且没有检测到 Vulkan GPU。WSL 当前只向 Linux 暴露 `/dev/dxg`，没有原生 Linux NVIDIA Vulkan ICD 和 `/dev/nvidia*` 设备。
++
++当前训练并不是完全运行在 CPU 上，而是使用以下混合模式：
++
++- Isaac Sim/PhysX 物理环境：CPU。
++- actor、critic、PPO 前向推理、反向传播和优化器：RTX 4060，设备为 `cuda:0`。
++
++实测 256 个并行环境完成 6144 个 timestep 的吞吐约为 `3071 steps/s`，单次 PPO 迭代约 2 秒。对应训练配置会在日志中分别记录为 `env.yaml: device: cpu` 和 `agent.yaml: device: cuda:0`。
++
++辅助脚本使用 `GO2_SIM_DEVICE` 选择物理仿真设备，使用 `GO2_RL_DEVICE` 选择强化学习网络设备。当前 WSL 的默认值分别为 `cpu` 和 `cuda:0`。
++
++WSL 长训练入口还会使用 `pxr` 无渲染 Kit 配置，以减少缺失 RTX/Vulkan 设备导致的退出阶段崩溃；它不会把 PhysX 变成 GPU 仿真。
++
++尝试把 RTX 渲染器替换为 `pxr` 或关闭 Kit Vulkan，仍然会得到 `CUDA libs are present, but no suitable CUDA GPU was found`，因此无法在当前 WSL 内启用 Isaac Sim GPU PhysX。不要在 WSL 内安装 Linux NVIDIA 显卡驱动，这会覆盖 Windows 映射进来的 CUDA stub，并可能破坏当前可用的 PyTorch CUDA。
++
++如果要求物理仿真和 PPO 都运行在 GPU 上，需要使用安装原生 Ubuntu 22.04/24.04 的 NVIDIA 计算机。对于这台笔记本，推荐使用双系统或外置 SSD 安装 Ubuntu，而不是继续修改 WSL 驱动。
++
++## NVIDIA EULA
++
++Isaac Sim 首次启动前要求用户接受 NVIDIA Omniverse EULA。请仅在阅读并接受该协议后设置以下环境变量：
++
++```bash
++export OMNI_KIT_ACCEPT_EULA=YES
++```
++
++辅助脚本不会自行设置这个环境变量，而是要求用户明确设置。
++
++## 冒烟训练
++
++冒烟训练用于验证以下环节是否可以完整执行：
++
++1. 创建训练环境。
++2. 启动物理仿真。
++3. 收集 PPO rollout 数据。
++4. 执行一次 PPO 更新。
++5. 写入 checkpoint。
++6. 正常关闭仿真程序。
++
++运行命令：
++
++```bash
++cd /home/hsc/unitree_rl_lab
++export OMNI_KIT_ACCEPT_EULA=YES
++./train_go2_smoke.sh
++```
++
++已经验证过的冒烟训练 checkpoint 为：
++
++```text
++/home/hsc/unitree_rl_lab/logs/rsl_rl/unitree_go2_velocity/2026-08-02_16-01-55/model_0.pt
++```
++
++这个 checkpoint 只用于证明训练流程已经跑通，并不是一个能够正常行走的策略。一次冒烟迭代不足以让机器人学会站立或行走，禁止将其直接下发到实体机器狗。
++
++在当前 WSL 中使用 CPU PhysX + RTX 4060 PPO 进行较长训练：
++
++```bash
++cd /home/hsc/unitree_rl_lab
++export OMNI_KIT_ACCEPT_EULA=YES
++./train_go2_wsl_gpu.sh
++```
++
++该脚本默认使用 256 个并行环境和 5000 次 PPO 迭代。也可以覆盖参数：
++
++```bash
++GO2_NUM_ENVS=128 GO2_MAX_ITERATIONS=1000 ./train_go2_wsl_gpu.sh
++```
++
++在原生 Ubuntu GPU 计算机上进行全 GPU 正式训练时，可以先使用 256 个并行环境，并在观察显存占用后逐步增加：
++
++```bash
++cd /home/hsc/unitree_rl_lab
++source ./activate_env.sh
++export OMNI_KIT_ACCEPT_EULA=YES
++python scripts/rsl_rl/train.py \
++  --headless \
++  --device cuda:0 \
++  --rl_device cuda:0 \
++  --task Unitree-Go2-Velocity \
++  --num_envs 256 \
++  --max_iterations 5000 \
++  --seed 42
++```
++
++## 导出策略
++
++`play.py` 会加载指定的 checkpoint，并在同一个训练目录下生成：
++
++```text
++exported/policy.onnx
++exported/policy.pt
++```
++
++导出时需要传入 checkpoint 的绝对路径：
++
++```bash
++cd /home/hsc/unitree_rl_lab
++export OMNI_KIT_ACCEPT_EULA=YES
++./export_go2_policy.sh /absolute/path/to/model_N.pt
++```
++
++已经验证过的冒烟策略导出目录为：
++
++```text
++/home/hsc/unitree_rl_lab/logs/rsl_rl/unitree_go2_velocity/2026-08-02_16-01-55/exported/
++```
++
++## MuJoCo sim2sim 验证
++
++sim2sim 表示把 Isaac Lab 中训练并导出的策略放入另一个仿真器 MuJoCo 中运行，用于检查策略接口和控制链路是否一致。
++
++分别打开两个终端执行以下命令。
++
++终端 1，启动 Go2 MuJoCo 仿真器：
++
++```bash
++/home/hsc/unitree_mujoco/run_go2.sh
++```
++
++终端 2，启动 Go2 C++ 策略控制器：
++
++```bash
++/home/hsc/unitree_rl_lab/run_go2_controller.sh
++```
++
++控制器使用 DDS Domain 1 和本机回环网络 `lo`。启动后先进入站立状态并保持 3 秒，然后自动切换到策略控制状态。
++
++作为实体机器人安全保护，DDS Domain 0 下禁止使用 `--auto-start`，防止测试命令意外控制真实机器人。
++
++实测中，控制器切换到 `Velocity` 后，冒烟策略能够改变仿真机器人的全部 12 个关节状态。由于该策略训练量极少，这项测试只能证明以下技术链路已经接通：
++
++- DDS 数据传输。
++- observation（观测量）组装。
++- ONNX 模型推理。
++- action（动作）与关节的映射。
++- 关节命令发送与状态反馈。
++
++这项测试不能证明策略已经具备有效的站立或行走能力。
++
++Go2 控制器会按照 `deploy/robots/go2/config/config.yaml` 中的配置，自动寻找最新的有效策略目录。训练导出目录必须同时包含：
++
++```text
++params/deploy.yaml
++exported/policy.onnx
++```
++
++## RS485 部署时必须保持的策略接口
++
++当前 Go2 策略的 observation 一共包含 45 个数值，排列顺序如下：
++
++1. 机身角速度 `base_ang_vel`：3 维。
++2. 投影重力方向 `projected_gravity`：3 维。
++3. 目标速度命令 `velocity_commands`：3 维。
++4. 相对默认姿态的关节位置 `joint_pos_rel`：12 维。
++5. 关节速度 `joint_vel_rel`：12 维。
++6. 上一次策略动作 `last_action`：12 维。
++
++策略输出 12 个经过归一化处理的关节位置 action。当前 Unitree SDK 使用的关节顺序为：
++
++```text
++FR_hip, FR_thigh, FR_calf,
++FL_hip, FL_thigh, FL_calf,
++RR_hip, RR_thigh, RR_calf,
++RL_hip, RL_thigh, RL_calf
++```
++
++对应含义：
++
++- `FR`：右前腿。
++- `FL`：左前腿。
++- `RR`：右后腿。
++- `RL`：左后腿。
++- `hip`：髋关节。
++- `thigh`：大腿关节。
++- `calf`：小腿关节。
++
++## 自制 GOM-8010-6 机器狗的替换边界
++
++针对使用 GOM-8010-6 电机的自制机器狗，第一阶段只替换 Go2 DDS 的 `LowState`/`LowCmd` 硬件适配层，将其改为自己的 RS485 状态读取和命令发送适配层。
++
++在第一个自制机器狗端到端闭环跑通之前，应保持以下内容与训练端完全一致：
++
++- 45 维 observation 的数值和排列顺序。
++- 12 维 action 的数值和排列顺序。
++- 角度、角速度和 IMU 的单位。
++- observation 的缩放和归一化方式。
++- action 的缩放方式。
++- 默认关节位置。
++- 关节正负方向。
++- 20 ms 策略推理周期，即 50 Hz。
++
++在确认以下项目之前，禁止将当前 Go2 策略发送给自制实体机器狗：
++
++- 12 个电机的 RS485 总线和电机 ID 映射。
++- 各关节机械零位和编码器零位。
++- 各关节正负方向。
++- 机械限位和软件限位。
++- 电机减速比。
++- 编码器位置与速度单位。
++- 最大位置、速度和力矩命令限制。
++- PD 控制增益。
++- RS485 通信超时处理。
++- 电机失联后的自动卸力或阻尼模式。
++- 实体急停开关和软件急停逻辑。
++
++## 推荐的后续开发顺序
++
++1. 在支持 Isaac Sim Vulkan/RTX 的原生 Ubuntu GPU 计算机上训练出能够稳定站立和行走的 Go2 策略。
++2. 建立自制机器狗的准确 URDF，包括尺寸、关节轴、质量、质心、惯量、关节方向和限位。
++3. 在 ROS 2 Humble 中实现 GOM-8010-6 的 RS485 电机驱动和硬件接口。
++4. 在不接入 RL 策略的情况下，先完成单电机和 12 电机的状态读取、位置控制、限幅、超时和急停验证。
++5. 使用固定站立目标完成低增益、悬空状态下的 12 关节闭环控制。
++6. 将 RS485 硬件适配层接入当前 45 维 observation 和 12 维 action 接口。
++7. 先进行悬空策略测试，再进行吊架保护下的接地测试，最后才进行自由站立和行走测试。
+diff --git a/activate_env.sh b/activate_env.sh
+new file mode 100755
+index 0000000..e26a6a3
+--- /dev/null
++++ b/activate_env.sh
+@@ -0,0 +1,8 @@
++#!/usr/bin/env bash
++
++source /home/hsc/miniconda3/etc/profile.d/conda.sh
++conda activate env_isaaclab
++export ISAACLAB_PATH=/home/hsc/IsaacLab
++export ROS_PACKAGE_PATH=/home/hsc:/home/hsc/unitree_ros/robots:${ROS_PACKAGE_PATH:-}
++export LD_LIBRARY_PATH="${CONDA_PREFIX}/lib:/usr/lib/wsl/lib:${LD_LIBRARY_PATH:-}"
++export TERM=${TERM:-xterm-256color}
+diff --git a/export_custom_dog_policy.sh b/export_custom_dog_policy.sh
+new file mode 100755
+index 0000000..6632003
+--- /dev/null
++++ b/export_custom_dog_policy.sh
+@@ -0,0 +1,23 @@
++#!/usr/bin/env bash
++set -euo pipefail
++
++if [[ $# -ne 1 ]]; then
++    echo "Usage: $0 /absolute/path/to/model_N.pt"
++    exit 2
++fi
++
++source "$(dirname "${BASH_SOURCE[0]}")/activate_env.sh"
++
++if [[ "${OMNI_KIT_ACCEPT_EULA:-}" != "YES" ]]; then
++    echo "Set OMNI_KIT_ACCEPT_EULA=YES only after accepting the NVIDIA Omniverse EULA."
++    exit 2
++fi
++
++python scripts/rsl_rl/play.py \
++    --headless \
++    --device "${CUSTOM_DOG_SIM_DEVICE:-cpu}" \
++    --task Custom-Dog-Velocity \
++    --num_envs 1 \
++    --checkpoint "$1" \
++    --max_steps 2 \
++    --kit_args "${CUSTOM_DOG_KIT_ARGS:---/renderer/enabled=pxr --/renderer/active=pxr --/renderer/multiGpu/enabled=false}"
+diff --git a/export_go2_policy.sh b/export_go2_policy.sh
+new file mode 100755
+index 0000000..3e4b786
+--- /dev/null
++++ b/export_go2_policy.sh
+@@ -0,0 +1,24 @@
++#!/usr/bin/env bash
++set -euo pipefail
++
++if [[ $# -ne 1 ]]; then
++    echo "Usage: $0 /absolute/path/to/model_N.pt"
++    exit 2
++fi
++
++source "$(dirname "${BASH_SOURCE[0]}")/activate_env.sh"
++
++if [[ "${OMNI_KIT_ACCEPT_EULA:-}" != "YES" ]]; then
++    echo "Set OMNI_KIT_ACCEPT_EULA=YES only after accepting the NVIDIA Omniverse EULA."
++    exit 2
++fi
++
++device="${GO2_DEVICE:-cpu}"
++
++python scripts/rsl_rl/play.py \
++    --headless \
++    --device "${device}" \
++    --task Unitree-Go2-Velocity \
++    --num_envs 1 \
++    --checkpoint "$1" \
++    --max_steps 2
+diff --git a/run_go2_controller.sh b/run_go2_controller.sh
+new file mode 100755
+index 0000000..ba927ca
+--- /dev/null
++++ b/run_go2_controller.sh
+@@ -0,0 +1,7 @@
++#!/usr/bin/env bash
++set -euo pipefail
++
++export LD_LIBRARY_PATH="/home/hsc/.local/unitree_robotics/lib:/home/hsc/unitree_rl_lab/deploy/thirdparty/onnxruntime-linux-x64-1.22.0/lib:${LD_LIBRARY_PATH:-}"
++
++cd "$(dirname "${BASH_SOURCE[0]}")/deploy/robots/go2"
++exec ./build/go2_ctrl --domain 1 --network lo --auto-start
+diff --git a/source/unitree_rl_lab/unitree_rl_lab/assets/robots/custom_dog.py b/source/unitree_rl_lab/unitree_rl_lab/assets/robots/custom_dog.py
+new file mode 100644
+index 0000000..5666ef0
+--- /dev/null
++++ b/source/unitree_rl_lab/unitree_rl_lab/assets/robots/custom_dog.py
+@@ -0,0 +1,83 @@
++"""Asset configuration for the custom quadruped."""
++
++import os
++
++import isaaclab.sim as sim_utils
++from isaaclab.assets.articulation import ArticulationCfg
++from isaaclab.utils import configclass
++
++from unitree_rl_lab.assets.robots import unitree_actuators
++from unitree_rl_lab.assets.robots.unitree import UnitreeArticulationCfg, UnitreeUrdfFileCfg
++
++
++CUSTOM_DOG_DESCRIPTION_DIR = os.environ.get(
++    "CUSTOM_DOG_DESCRIPTION_DIR", "/home/hsc/custom_dog_description"
++)
++
++
++@configclass
++class GoM8010Calf2To1Cfg(unitree_actuators.UnitreeActuatorCfg_Go2HV):
++    """GO-M8010-6 curve reflected through the calf's 1:2 transmission."""
++
++    # These are the Go2HV envelope values reflected through a 2:1
++    # output-speed reduction.  Configclass fields are instance values,
++    # not attributes available on the parent class.
++    X1 = 6.75
++    X2 = 15.0
++    Y1 = 40.4
++    Y2 = 46.8
++
++
++CUSTOM_DOG_CFG = UnitreeArticulationCfg(
++    spawn=UnitreeUrdfFileCfg(
++        asset_path=f"{CUSTOM_DOG_DESCRIPTION_DIR}/urdf/custom_dog.urdf",
++        # The current CAD visual meshes overlap around adjacent joint housings.
++        # Keep illegal ground-contact checks, but disable articulation self-contact.
++        articulation_props=sim_utils.ArticulationRootPropertiesCfg(
++            enabled_self_collisions=False,
++            solver_position_iteration_count=8,
++            solver_velocity_iteration_count=4,
++        ),
++    ),
++    init_state=ArticulationCfg.InitialStateCfg(
++        # Computed from this robot's thigh/calf lengths and foot-frame sphere
++        # centers; Go2's 0.4 m base height leaves this model floating.
++        pos=(0.0, 0.0, 0.324),
++        joint_pos={
++            ".*R_hip_joint": -0.1,
++            ".*L_hip_joint": 0.1,
++            "F[L,R]_thigh_joint": 0.8,
++            "R[L,R]_thigh_joint": 0.8,
++            ".*_calf_joint": -1.5,
++        },
++        joint_vel={".*": 0.0},
++    ),
++    actuators={
++        "GO_M8010_6_direct": unitree_actuators.UnitreeActuatorCfg_Go2HV(
++            joint_names_expr=[".*_(hip|thigh)_joint"],
++            stiffness=25.0,
++            damping=0.5,
++            friction=0.01,
++        ),
++        "GO_M8010_6_calf_2_to_1": GoM8010Calf2To1Cfg(
++            joint_names_expr=[".*_calf_joint"],
++            stiffness=25.0,
++            damping=0.5,
++            friction=0.01,
++        ),
++    },
++    joint_sdk_names=[
++        "FR_hip_joint",
++        "FR_thigh_joint",
++        "FR_calf_joint",
++        "FL_hip_joint",
++        "FL_thigh_joint",
++        "FL_calf_joint",
++        "RR_hip_joint",
++        "RR_thigh_joint",
++        "RR_calf_joint",
++        "RL_hip_joint",
++        "RL_thigh_joint",
++        "RL_calf_joint",
++    ],
++)
+diff --git a/source/unitree_rl_lab/unitree_rl_lab/tasks/locomotion/robots/custom_dog/__init__.py b/source/unitree_rl_lab/unitree_rl_lab/tasks/locomotion/robots/custom_dog/__init__.py
+new file mode 100644
+index 0000000..05a0768
+--- /dev/null
++++ b/source/unitree_rl_lab/unitree_rl_lab/tasks/locomotion/robots/custom_dog/__init__.py
+@@ -0,0 +1,15 @@
++import gymnasium as gym
++
++
++gym.register(
++    id="Custom-Dog-Velocity",
++    entry_point="isaaclab.envs:ManagerBasedRLEnv",
++    disable_env_checker=True,
++    kwargs={
++        "env_cfg_entry_point": f"{__name__}.velocity_env_cfg:RobotEnvCfg",
++        "play_env_cfg_entry_point": f"{__name__}.velocity_env_cfg:RobotPlayEnvCfg",
++        "rsl_rl_cfg_entry_point": (
++            "unitree_rl_lab.tasks.locomotion.agents.rsl_rl_ppo_cfg:BasePPORunnerCfg"
++        ),
++    },
++)
+diff --git a/source/unitree_rl_lab/unitree_rl_lab/tasks/locomotion/robots/custom_dog/velocity_env_cfg.py b/source/unitree_rl_lab/unitree_rl_lab/tasks/locomotion/robots/custom_dog/velocity_env_cfg.py
+new file mode 100644
+index 0000000..7e02bf4
+--- /dev/null
++++ b/source/unitree_rl_lab/unitree_rl_lab/tasks/locomotion/robots/custom_dog/velocity_env_cfg.py
+@@ -0,0 +1,38 @@
++"""Custom-dog task derived from the working Go2 locomotion task."""
++
++from isaaclab.utils import configclass
++
++from unitree_rl_lab.assets.robots.custom_dog import CUSTOM_DOG_CFG
++from unitree_rl_lab.tasks.locomotion.robots.go2.velocity_env_cfg import (
++    RobotEnvCfg as Go2RobotEnvCfg,
++)
++
++
++@configclass
++class RobotEnvCfg(Go2RobotEnvCfg):
++    """Go2 locomotion MDP using the custom robot asset."""
++
++    def __post_init__(self):
++        self.scene.robot = CUSTOM_DOG_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
++        # Headless WSL training does not need the remote USD velocity arrows.
++        self.commands.base_velocity.debug_vis = False
++        # These rendering-only assets require MDL/Vulkan, which Isaac Sim does
++        # not expose under WSL. Physics material and terrain collision remain.
++        self.scene.terrain.visual_material = None
++        self.scene.sky_light = None
++        self.rewards.undesired_contacts.params["sensor_cfg"].body_names = [
++            ".*_hip",
++            ".*_thigh",
++            ".*_calf",
++        ]
++        super().__post_init__()
++
++
++@configclass
++class RobotPlayEnvCfg(RobotEnvCfg):
++    def __post_init__(self):
++        super().__post_init__()
++        self.scene.num_envs = 32
++        self.scene.terrain.terrain_generator.num_rows = 2
++        self.scene.terrain.terrain_generator.num_cols = 1
++        self.commands.base_velocity.ranges = self.commands.base_velocity.limit_ranges
+diff --git a/train_custom_dog_smoke.sh b/train_custom_dog_smoke.sh
+new file mode 100755
+index 0000000..dde192f
+--- /dev/null
++++ b/train_custom_dog_smoke.sh
+@@ -0,0 +1,35 @@
++#!/usr/bin/env bash
++set -euo pipefail
++
++source "$(dirname "${BASH_SOURCE[0]}")/activate_env.sh"
++
++if [[ "${OMNI_KIT_ACCEPT_EULA:-}" != "YES" ]]; then
++    echo "Set OMNI_KIT_ACCEPT_EULA=YES only after accepting the NVIDIA Omniverse EULA."
++    exit 2
++fi
++
++sim_device="${CUSTOM_DOG_SIM_DEVICE:-cpu}"
++rl_device="${CUSTOM_DOG_RL_DEVICE:-cuda:0}"
++num_envs="${CUSTOM_DOG_NUM_ENVS:-1}"
++max_iterations="${CUSTOM_DOG_MAX_ITERATIONS:-1}"
++kit_args="${CUSTOM_DOG_KIT_ARGS:---/renderer/enabled=pxr --/renderer/active=pxr --/renderer/multiGpu/enabled=false}"
++
++printf 'Isaac Lab simulation device: %s\n' "${sim_device}"
++printf 'RSL-RL PPO device: %s\n' "${rl_device}"
++
++cmd=(
++    python scripts/rsl_rl/train.py
++    --headless
++    --device "${sim_device}"
++    --rl_device "${rl_device}"
++    --task Custom-Dog-Velocity
++    --num_envs "${num_envs}"
++    --max_iterations "${max_iterations}"
++    --seed 42
++)
++
++if [[ -n "${kit_args}" ]]; then
++    cmd+=(--kit_args "${kit_args}")
++fi
++
++"${cmd[@]}"
+diff --git a/train_custom_dog_wsl_gpu.sh b/train_custom_dog_wsl_gpu.sh
+new file mode 100755
+index 0000000..52f873d
+--- /dev/null
++++ b/train_custom_dog_wsl_gpu.sh
+@@ -0,0 +1,9 @@
++#!/usr/bin/env bash
++set -euo pipefail
++
++export CUSTOM_DOG_SIM_DEVICE="${CUSTOM_DOG_SIM_DEVICE:-cpu}"
++export CUSTOM_DOG_RL_DEVICE="${CUSTOM_DOG_RL_DEVICE:-cuda:0}"
++export CUSTOM_DOG_NUM_ENVS="${CUSTOM_DOG_NUM_ENVS:-128}"
++export CUSTOM_DOG_MAX_ITERATIONS="${CUSTOM_DOG_MAX_ITERATIONS:-5000}"
++
++exec "$(dirname "${BASH_SOURCE[0]}")/train_custom_dog_smoke.sh"
+diff --git a/train_go2_smoke.sh b/train_go2_smoke.sh
+new file mode 100755
+index 0000000..66cd6de
+--- /dev/null
++++ b/train_go2_smoke.sh
+@@ -0,0 +1,36 @@
++#!/usr/bin/env bash
++set -euo pipefail
++
++source "$(dirname "${BASH_SOURCE[0]}")/activate_env.sh"
++
++if [[ "${OMNI_KIT_ACCEPT_EULA:-}" != "YES" ]]; then
++    echo "Set OMNI_KIT_ACCEPT_EULA=YES only after accepting the NVIDIA Omniverse EULA."
++    exit 2
++fi
++
++sim_device="${GO2_SIM_DEVICE:-${GO2_DEVICE:-cpu}}"
++rl_device="${GO2_RL_DEVICE:-cuda:0}"
++num_envs="${GO2_NUM_ENVS:-1}"
++max_iterations="${GO2_MAX_ITERATIONS:-1}"
++kit_args="${GO2_KIT_ARGS:-}"
++
++printf 'Isaac Lab simulation device: %s\n' "${sim_device}"
++printf 'RSL-RL PPO device: %s\n' "${rl_device}"
++
++cmd=(
++    python scripts/rsl_rl/train.py
++    --headless
++    --device "${sim_device}"
++    --rl_device "${rl_device}"
++    --task Unitree-Go2-Velocity
++    --num_envs "${num_envs}"
++    --max_iterations "${max_iterations}"
++    --seed 42
++)
++
++if [[ -n "${kit_args}" ]]; then
++    printf 'Omniverse Kit arguments: %s\n' "${kit_args}"
++    cmd+=(--kit_args "${kit_args}")
++fi
++
++"${cmd[@]}"
+diff --git a/train_go2_wsl_gpu.sh b/train_go2_wsl_gpu.sh
+new file mode 100755
+index 0000000..6e1b7c0
+--- /dev/null
++++ b/train_go2_wsl_gpu.sh
+@@ -0,0 +1,10 @@
++#!/usr/bin/env bash
++set -euo pipefail
++
++export GO2_SIM_DEVICE=cpu
++export GO2_RL_DEVICE=cuda:0
++export GO2_KIT_ARGS="${GO2_KIT_ARGS:---/renderer/enabled=pxr --/renderer/active=pxr --/renderer/multiGpu/enabled=false}"
++export GO2_NUM_ENVS="${GO2_NUM_ENVS:-256}"
++export GO2_MAX_ITERATIONS="${GO2_MAX_ITERATIONS:-5000}"
++
++exec "$(dirname "${BASH_SOURCE[0]}")/train_go2_smoke.sh"

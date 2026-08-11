@@ -7,15 +7,20 @@ if [[ $# -ne 1 ]]; then
 fi
 
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-unitree_rl_lab_root="${UNITREE_RL_LAB_ROOT:-/home/hsc/unitree_rl_lab}"
-sdk_prefix="${UNITREE_SDK_PREFIX:-/home/hsc/.local/unitree_robotics}"
+unitree_rl_lab_root="${UNITREE_RL_LAB_ROOT:-${project_root}/third_party/unitree_rl_lab}"
+sdk_prefix="${UNITREE_SDK_PREFIX:-${HOME}/.local/unitree_robotics}"
 env_name="${CUSTOM_DOG_MUJOCO_ENV:-custom_dog_mujoco}"
-mujoco_python="${CUSTOM_DOG_MUJOCO_PYTHON:-/home/hsc/.conda/envs/${env_name}/bin/python}"
+conda_exe="${CONDA_EXE:-$(command -v conda 2>/dev/null || true)}"
+mujoco_python="${CUSTOM_DOG_MUJOCO_PYTHON:-}"
 policy_dir="$(realpath "$1")"
 runtime_dir="${project_root}/sim2sim/unitree_deploy/build/runtime"
 source_binary="${unitree_rl_lab_root}/deploy/robots/go2/build/go2_ctrl"
 
-if [[ ! -x "${mujoco_python}" ]]; then
+if [[ -z "${mujoco_python}" && -n "${conda_exe}" ]]; then
+    mujoco_python="$("${conda_exe}" run -n "${env_name}" python -c 'import sys; print(sys.executable)')"
+fi
+
+if [[ -z "${mujoco_python}" || ! -x "${mujoco_python}" ]]; then
     echo "MuJoCo environment Python not found: ${mujoco_python}" >&2
     exit 1
 fi

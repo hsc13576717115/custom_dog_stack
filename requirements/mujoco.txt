@@ -1,0 +1,5 @@
+mujoco==3.11.0
+numpy==2.2.6
+onnxruntime==1.23.2
+PyYAML==6.0.2
+urdf-to-mjcf==0.1.1

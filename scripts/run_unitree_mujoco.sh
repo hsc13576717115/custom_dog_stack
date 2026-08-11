@@ -2,9 +2,9 @@
 set -euo pipefail
 
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-unitree_root="${UNITREE_MUJOCO_ROOT:-/home/hsc/unitree_mujoco}"
-sdk_prefix="${UNITREE_SDK_PREFIX:-/home/hsc/.local/unitree_robotics}"
-isaac_conda_lib="${ISAAC_CONDA_LIB:-/home/hsc/miniconda3/envs/env_isaaclab/lib}"
+unitree_root="${UNITREE_MUJOCO_ROOT:-${project_root}/third_party/unitree_mujoco}"
+sdk_prefix="${UNITREE_SDK_PREFIX:-${HOME}/.local/unitree_robotics}"
+isaac_conda_lib="${ISAAC_CONDA_LIB:-${CONDA_PREFIX:-}/lib}"
 binary="${unitree_root}/simulate/build/unitree_mujoco"
 model="${project_root}/sim2sim/custom_dog/custom_dog_unitree.xml"
 

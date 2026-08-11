@@ -11,10 +11,12 @@ for dependency_dir in "${ISAACLAB_ROOT}" "${UNITREE_RL_LAB_ROOT}" "${UNITREE_MUJ
     fi
 done
 
-if [[ -x /usr/lib/wsl/lib/nvidia-smi ]]; then
+if command -v nvidia-smi >/dev/null 2>&1; then
+    nvidia-smi --query-gpu=name,driver_version,memory.total --format=csv,noheader
+elif [[ -x /usr/lib/wsl/lib/nvidia-smi ]]; then
     /usr/lib/wsl/lib/nvidia-smi --query-gpu=name,driver_version,memory.total --format=csv,noheader
 else
-    echo "WARNING: WSL nvidia-smi is unavailable."
+    echo "WARNING: nvidia-smi is unavailable."
 fi
 
 python - <<'PY'

@@ -1,0 +1,7 @@
+# Packages used directly by custom_dog_stack beyond Isaac Sim/Isaac Lab.
+# Isaac Sim, CUDA PyTorch and Isaac Lab are installed by setup_ubuntu2204.sh.
+onnx==1.18.0
+onnxruntime==1.23.2
+PyYAML==6.0.2
+tensorboard==2.21.0
+pytest==9.1.1

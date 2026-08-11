@@ -1,0 +1,15 @@
+[submodule "third_party/IsaacLab"]
+	path = third_party/IsaacLab
+	url = https://github.com/isaac-sim/IsaacLab.git
+[submodule "third_party/unitree_rl_lab"]
+	path = third_party/unitree_rl_lab
+	url = https://github.com/unitreerobotics/unitree_rl_lab.git
+[submodule "third_party/unitree_mujoco"]
+	path = third_party/unitree_mujoco
+	url = https://github.com/unitreerobotics/unitree_mujoco.git
+[submodule "third_party/Dog-control"]
+	path = third_party/Dog-control
+	url = git@github.com:hsc13576717115/Dog-control.git
+[submodule "third_party/unitree_sdk2"]
+	path = third_party/unitree_sdk2
+	url = https://github.com/unitreerobotics/unitree_sdk2.git

@@ -55,16 +55,29 @@ third_party/        外部依赖提交号，不复制上游源码
 
 ## 0. 环境准备
 
-当前 WSL 工作区假设以下目录存在：
+迁移到原生 Ubuntu 22.04 时，优先按照
+[`docs/ubuntu2204_migration.md`](docs/ubuntu2204_migration.md) 执行。仓库已把
+Isaac Lab、Unitree RL Lab 和 Unitree MuJoCo 固定为 Git submodule，并保存当前 WSL
+使用的 Unitree 本地补丁。推荐克隆方式：
 
-```text
-/home/hsc/IsaacLab
-/home/hsc/unitree_rl_lab
-/home/hsc/unitree_mujoco
-/home/hsc/custom_dog_stack
+```bash
+git clone --recurse-submodules git@github.com:hsc13576717115/custom_dog_stack.git
+cd custom_dog_stack
+git lfs pull
+export OMNI_KIT_ACCEPT_EULA=YES
+./scripts/setup_ubuntu2204.sh --install-system-deps
 ```
 
-如果目录不同，可以在执行脚本前覆盖环境变量：
+新安装默认使用仓库内固定版本的 submodule：
+
+```text
+custom_dog_stack/third_party/IsaacLab
+custom_dog_stack/third_party/unitree_rl_lab
+custom_dog_stack/third_party/unitree_mujoco
+custom_dog_stack/third_party/unitree_sdk2
+```
+
+仍可用已有的外部工作区，只需在执行脚本前覆盖环境变量：
 
 ```bash
 export ISAACLAB_ROOT=/path/to/IsaacLab

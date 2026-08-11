@@ -1,0 +1,273 @@
+diff --git a/example/cpp/CMakeLists.txt b/example/cpp/CMakeLists.txt
+index 291ff21..9565a77 100644
+--- a/example/cpp/CMakeLists.txt
++++ b/example/cpp/CMakeLists.txt
+@@ -1,10 +1,11 @@
+ cmake_minimum_required(VERSION 3.16)
+ project(stand_go2)
+ 
+-list(APPEND CMAKE_PREFIX_PATH "/opt/unitree_robotics/lib/cmake")
++set(UNITREE_SDK_PREFIX "/home/hsc/.local/unitree_robotics" CACHE PATH "Unitree SDK2 install prefix")
++list(APPEND CMAKE_PREFIX_PATH "${UNITREE_SDK_PREFIX}/lib/cmake")
+ find_package(unitree_sdk2 REQUIRED)
+ 
+ add_executable(stand_go2 stand_go2.cpp)
+ target_link_libraries(stand_go2  unitree_sdk2)
+ 
+-SET(CMAKE_BUILD_TYPE Release)
+\ No newline at end of file
++SET(CMAKE_BUILD_TYPE Release)
+diff --git a/simulate/CMakeLists.txt b/simulate/CMakeLists.txt
+index 8870289..5e60576 100644
+--- a/simulate/CMakeLists.txt
++++ b/simulate/CMakeLists.txt
+@@ -9,13 +9,19 @@ else()
+   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++17 -O3 -DNDEBUG -fPIC")
+ endif()
+ 
+-list(APPEND CMAKE_PREFIX_PATH "/opt/unitree_robotics/lib/cmake")
++set(UNITREE_SDK_PREFIX "/home/hsc/.local/unitree_robotics" CACHE PATH "Unitree SDK2 install prefix")
++list(APPEND CMAKE_PREFIX_PATH "${UNITREE_SDK_PREFIX}/lib/cmake")
+ find_package(unitree_sdk2 REQUIRED)
+ find_package(Boost REQUIRED COMPONENTS program_options)
+ 
++if(DEFINED ENV{CONDA_PREFIX})
++  include_directories($ENV{CONDA_PREFIX}/include)
++  link_directories($ENV{CONDA_PREFIX}/lib)
++endif()
++
+ 
+ include_directories(
+-  /usr/local/include/iceoryx/v2.0.2
++  ${UNITREE_SDK_PREFIX}/include/iceoryx/v2.0.2
+   mujoco/include
+   mujoco/simulate
+   src/lodepng
+@@ -44,4 +50,4 @@ link_libraries(
+ 
+ add_executable(unitree_mujoco ${SIM_SRC} src/main.cc)
+ 
+-add_executable(jstest src/joystick/jstest.cc src/joystick/joystick.cc)
+\ No newline at end of file
++add_executable(jstest src/joystick/jstest.cc src/joystick/joystick.cc)
+diff --git a/simulate/src/main.cc b/simulate/src/main.cc
+index 3368d91..d3ce007 100755
+--- a/simulate/src/main.cc
++++ b/simulate/src/main.cc
+@@ -543,12 +543,23 @@ void PhysicsThread(mj::Simulate *sim, const char *filename)
+   {
+     sim->LoadMessage(filename);
+     m = LoadModel(filename, *sim);
+-    if (m)
+-      d = mj_makeData(m);
+-    if (d)
++    mjData *dnew = m ? mj_makeData(m) : nullptr;
++    if (dnew)
+     {
+-      sim->Load(m, d, filename);
+-      mj_forward(m, d);
++      // Publish the data pointer only after the model has been loaded and
++      // initialized. The SDK2 bridge waits on d; publishing it earlier lets
++      // the bridge capture the zero-initialized state before the home keyframe
++      // is applied.
++      sim->Load(m, dnew, filename);
++      const int home_key = mj_name2id(m, mjOBJ_KEY, "home");
++      if (home_key >= 0)
++      {
++        // Custom robots may not balance from q=0 while the SDK2 bridge starts.
++        // Use an explicit home keyframe when the model provides one.
++        mj_resetDataKeyframe(m, dnew, home_key);
++      }
++      mj_forward(m, dnew);
++      d = dnew;
+ 
+       // allocate ctrlnoise
+       free(ctrlnoise);
+@@ -573,6 +584,7 @@ void PhysicsThread(mj::Simulate *sim, const char *filename)
+ 
+ void *UnitreeSdk2BridgeThread(void *arg)
+ {
++  auto *sim = static_cast<mj::Simulate *>(arg);
+   // Wait for mujoco data
+   while (true)
+   {
+@@ -595,11 +607,17 @@ void *UnitreeSdk2BridgeThread(void *arg)
+   
+   std::unique_ptr<UnitreeSDK2BridgeBase> interface = nullptr;
+   if (m->nu > NUM_MOTOR_IDL_GO) {
+-    interface = std::make_unique<G1Bridge>(m, d);
++    interface = std::make_unique<G1Bridge>(m, d, &sim->mtx);
+   } else {
+-    interface = std::make_unique<Go2Bridge>(m, d);
++    interface = std::make_unique<Go2Bridge>(m, d, &sim->mtx);
+   }
+   interface->start();
++  // Start physics only after the SDK2 bridge has installed its initial
++  // home-pose PD command. This prevents a torque-driven custom model from
++  // falling during DDS/controller startup.
++  if (sim != nullptr) {
++    sim->run = 1;
++  }
+   
+   while (true)
+   {
+@@ -683,7 +701,9 @@ int main(int argc, char **argv)
+     std::make_unique<mj::GlfwAdapter>(),
+     &cam, &opt, &pert, /* is_passive = */ false);
+ 
+-  std::thread unitree_thread(UnitreeSdk2BridgeThread, nullptr);
++  // Keep the freshly loaded model paused until the SDK2 bridge is ready.
++  sim->run = 0;
++  std::thread unitree_thread(UnitreeSdk2BridgeThread, sim.get());
+ 
+   // start physics thread
+   std::thread physicsthreadhandle(&PhysicsThread, sim.get(), param::config.robot_scene.c_str());
+diff --git a/simulate/src/unitree_sdk2_bridge.h b/simulate/src/unitree_sdk2_bridge.h
+index 7c13289..44b8f68 100644
+--- a/simulate/src/unitree_sdk2_bridge.h
++++ b/simulate/src/unitree_sdk2_bridge.h
+@@ -9,8 +9,11 @@
+ #include <unitree/idl/hg/BmsState_.hpp>
+ #include <unitree/idl/hg/IMUState_.hpp>
+ 
++#include <cstdlib>
++#include <fstream>
++#include <iomanip>
+ #include <iostream>
+-
++#include <mutex>
+ #include "param.h"
+ #include "physics_joystick.h"
+ 
+@@ -19,8 +22,10 @@
+ class UnitreeSDK2BridgeBase
+ {
+ public:
+-    UnitreeSDK2BridgeBase(mjModel *model, mjData *data)
+-    : mj_model_(model), mj_data_(data)
++    UnitreeSDK2BridgeBase(
++        mjModel *model, mjData *data, std::recursive_mutex *data_mutex = nullptr
++    )
++    : mj_model_(model), mj_data_(data), data_mutex_(data_mutex)
+     {
+         _check_sensor();
+         if(param::config.print_scene_information == 1) {
+@@ -76,6 +81,7 @@ protected:
+ 
+     mjData *mj_data_;
+     mjModel *mj_model_;
++    std::recursive_mutex *data_mutex_;
+ 
+     // Sensor data indices
+     int imu_quat_adr_ = -1;
+@@ -155,7 +161,9 @@ using HighState_t = unitree::robot::go2::publisher::SportModeState;
+ using WirelessController_t = unitree::robot::go2::publisher::WirelessController;
+ 
+ public:
+-    RobotBridge(mjModel *model, mjData *data) : UnitreeSDK2BridgeBase(model, data)
++    RobotBridge(
++        mjModel *model, mjData *data, std::recursive_mutex *data_mutex = nullptr
++    ) : UnitreeSDK2BridgeBase(model, data, data_mutex)
+     {
+         lowcmd = std::make_shared<LowCmd_t>("rt/lowcmd");
+         lowstate = std::make_unique<LowState_t>();
+@@ -163,6 +171,35 @@ public:
+         highstate = std::make_unique<HighState_t>();
+         wireless_controller = std::make_unique<WirelessController_t>();
+         wireless_controller->joystick = joystick;
++
++        // Hold a model-provided home pose while the external SDK2 controller
++        // is still connecting. Without this, a custom robot can fall from its
++        // initial pose before the controller publishes its first LowCmd.
++        if (mj_name2id(mj_model_, mjOBJ_KEY, "home") >= 0) {
++            for (int i = 0; i < num_motor_; ++i) {
++                auto & motor = lowcmd->msg_.motor_cmd()[i];
++                motor.q() = mj_data_->sensordata[i];
++                motor.dq() = 0;
++                motor.tau() = 0;
++                motor.kp() = 25;
++                motor.kd() = 0.5;
++            }
++        }
++
++        const char *trace_path = std::getenv("UNITREE_MUJOCO_BRIDGE_TRACE");
++        if (trace_path != nullptr && trace_path[0] != '\0') {
++            trace_stream_.open(trace_path, std::ios::out | std::ios::trunc);
++            if (!trace_stream_.is_open()) {
++                throw std::runtime_error(std::string("Could not open bridge trace: ") + trace_path);
++            }
++            trace_stream_ << std::setprecision(9) << "time_s";
++            for (const char *prefix : {"joint_q", "joint_dq", "command_q", "kp", "kd", "torque"}) {
++                for (int i = 0; i < num_motor_; ++i) {
++                    trace_stream_ << ',' << prefix << '_' << i;
++                }
++            }
++            trace_stream_ << '\n';
++        }
+     }
+ 
+     void start()
+@@ -175,6 +212,10 @@ public:
+     {
+         if(!mj_data_) return;
+         if(lowstate->joystick) { lowstate->joystick->update(); }
++        std::unique_lock<std::recursive_mutex> data_lock;
++        if (data_mutex_ != nullptr) {
++            data_lock = std::unique_lock<std::recursive_mutex>(*data_mutex_);
++        }
+         // lowcmd
+         {
+             std::lock_guard<std::mutex> lock(lowcmd->mutex_);
+@@ -184,6 +225,17 @@ public:
+                                     m.kp() * (m.q() - mj_data_->sensordata[i]) +
+                                     m.kd() * (m.dq() - mj_data_->sensordata[i + num_motor_]);
+             }
++            if (trace_stream_.is_open() && trace_rows_ < 10000) {
++                trace_stream_ << mj_data_->time;
++                for (int i = 0; i < num_motor_; ++i) trace_stream_ << ',' << mj_data_->sensordata[i];
++                for (int i = 0; i < num_motor_; ++i) trace_stream_ << ',' << mj_data_->sensordata[i + num_motor_];
++                for (int i = 0; i < num_motor_; ++i) trace_stream_ << ',' << lowcmd->msg_.motor_cmd()[i].q();
++                for (int i = 0; i < num_motor_; ++i) trace_stream_ << ',' << lowcmd->msg_.motor_cmd()[i].kp();
++                for (int i = 0; i < num_motor_; ++i) trace_stream_ << ',' << lowcmd->msg_.motor_cmd()[i].kd();
++                for (int i = 0; i < num_motor_; ++i) trace_stream_ << ',' << mj_data_->ctrl[i];
++                trace_stream_ << '\n';
++                if (++trace_rows_ % 100 == 0) trace_stream_.flush();
++            }
+         }
+ 
+         // lowstate
+@@ -252,6 +304,8 @@ public:
+     
+ private:
+     unitree::common::RecurrentThreadPtr thread_;
++    std::ofstream trace_stream_;
++    size_t trace_rows_ = 0;
+ };
+ 
+ using Go2Bridge = RobotBridge<unitree::robot::go2::subscription::LowCmd, unitree::robot::go2::publisher::LowState>;
+@@ -259,7 +313,9 @@ using Go2Bridge = RobotBridge<unitree::robot::go2::subscription::LowCmd, unitree
+ class G1Bridge : public RobotBridge<unitree::robot::g1::subscription::LowCmd, unitree::robot::g1::publisher::LowState>
+ {
+ public:
+-    G1Bridge(mjModel *model, mjData *data) : RobotBridge(model, data)
++    G1Bridge(
++        mjModel *model, mjData *data, std::recursive_mutex *data_mutex = nullptr
++    ) : RobotBridge(model, data, data_mutex)
+     {
+         if (param::config.robot.find("g1") != std::string::npos) {
+             auto* g1_lowstate = dynamic_cast<unitree::robot::g1::publisher::LowState*>(lowstate.get());
+diff --git a/run_go2.sh b/run_go2.sh
+new file mode 100755
+index 0000000..857995f
+--- /dev/null
++++ b/run_go2.sh
+@@ -0,0 +1,9 @@
++#!/usr/bin/env bash
++set -euo pipefail
++
++source /home/hsc/miniconda3/etc/profile.d/conda.sh
++conda activate env_isaaclab
++export LD_LIBRARY_PATH="/home/hsc/.local/unitree_robotics/lib:/home/hsc/.mujoco/mujoco-3.3.6/lib:${CONDA_PREFIX}/lib:${LD_LIBRARY_PATH:-}"
++
++cd "$(dirname "${BASH_SOURCE[0]}")/simulate"
++exec ./build/unitree_mujoco -i 1 -n lo -r go2 -s scene.xml

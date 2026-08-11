@@ -9,6 +9,7 @@ __pycache__/
 # Isaac Sim / Isaac Lab generated files
 logs/
 outputs/
+reports/data/
 *.usd
 *.usda
 *.usdc
@@ -21,6 +22,17 @@ outputs/
 *.ckpt
 events.out.tfevents.*
 artifacts/traces/
+
+# One explicitly promoted checkpoint may be kept for reproducible fine-tuning.
+artifacts/checkpoints/*
+!artifacts/checkpoints/README.md
+!artifacts/checkpoints/omni45-axis4698/
+!artifacts/checkpoints/omni45-axis4698/**
+
+# Candidate exports are local evaluation scratch space. Promote a selected
+# policy to deploy/releases/<version>/ before committing it.
+deploy/candidates/*
+!deploy/candidates/.gitkeep
 
 # ROS 2 / colcon
 build/
