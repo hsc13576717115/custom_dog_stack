@@ -160,6 +160,22 @@ def main() -> None:
         )
         gait_phase[np.linalg.norm(calibrated_command, axis=1) <= threshold] = 0.0
         raw_terms["gait_phase"] = observation_term(gait_phase, obs_cfg["gait_phase"])
+    if "trot_clock" in obs_cfg:
+        clock_cfg = obs_cfg["trot_clock"]["params"]
+        threshold = float(clock_cfg.get("command_threshold", 0.1))
+        min_frequency = float(clock_cfg.get("min_frequency", 1.4))
+        max_frequency = float(clock_cfg.get("max_frequency", 3.2))
+        full_speed = float(clock_cfg.get("full_speed", 3.0))
+        yaw_speed_scale = float(clock_cfg.get("yaw_speed_scale", 0.35))
+        motion_speed = np.linalg.norm(calibrated_command[:, :2], axis=1)
+        motion_speed += yaw_speed_scale * np.abs(calibrated_command[:, 2])
+        blend = np.clip(motion_speed / full_speed, 0.0, 1.0)
+        frequency = min_frequency + blend * (max_frequency - min_frequency)
+        phase = np.arange(len(rows), dtype=np.float64) * float(cfg["step_dt"]) * frequency
+        foot_phase = (phase[:, np.newaxis] + np.asarray((0.0, 0.5, 0.5, 0.0))) % 1.0
+        trot_clock = np.sin(2.0 * np.pi * foot_phase)
+        trot_clock[motion_speed <= threshold] = 0.0
+        raw_terms["trot_clock"] = observation_term(trot_clock, obs_cfg["trot_clock"])
     if "base_lin_vel_xy" in obs_cfg:
         assert base_lin_vel is not None
         raw_terms["base_lin_vel_xy"] = observation_term(

@@ -16,6 +16,15 @@ policy_dir="$(realpath "$1")"
 runtime_dir="${project_root}/sim2sim/unitree_deploy/build/runtime"
 source_binary="${unitree_rl_lab_root}/deploy/robots/go2/build/go2_ctrl"
 
+if [[ -z "${conda_exe}" ]]; then
+    for candidate in "${HOME}/miniconda3/bin/conda" "${HOME}/anaconda3/bin/conda" /opt/conda/bin/conda; do
+        if [[ -x "${candidate}" ]]; then
+            conda_exe="${candidate}"
+            break
+        fi
+    done
+fi
+
 if [[ -z "${mujoco_python}" && -n "${conda_exe}" ]]; then
     mujoco_python="$("${conda_exe}" run -n "${env_name}" python -c 'import sys; print(sys.executable)')"
 fi

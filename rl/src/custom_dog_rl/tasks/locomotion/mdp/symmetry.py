@@ -17,6 +17,7 @@ __all__ = ["compute_symmetric_states"]
 _POLICY_BASE_DIM = 45
 _CRITIC_BASE_DIM = 60
 _GAIT_PHASE_DIM = 2
+_TROT_CLOCK_DIM = 4
 _ACTION_DIM = 12
 
 
@@ -64,7 +65,11 @@ def _mirror_joint_data(env, joint_data: torch.Tensor) -> torch.Tensor:
 
 
 def _mirror_policy_observation(env, observation: torch.Tensor) -> torch.Tensor:
-    valid_dims = (_POLICY_BASE_DIM, _POLICY_BASE_DIM + _GAIT_PHASE_DIM)
+    valid_dims = (
+        _POLICY_BASE_DIM,
+        _POLICY_BASE_DIM + _GAIT_PHASE_DIM,
+        _POLICY_BASE_DIM + _TROT_CLOCK_DIM,
+    )
     if observation.shape[-1] not in valid_dims:
         raise ValueError(
             f"Custom-dog policy symmetry expects one of {valid_dims}, got {observation.shape[-1]}"
@@ -94,11 +99,22 @@ def _mirror_policy_observation(env, observation: torch.Tensor) -> torch.Tensor:
             # A left-right reflection swaps the two trot diagonals, which is a
             # half-period shift of the global gait clock.
             mirrored[..., 45:47] = -observation[..., 45:47]
+    elif observation.shape[-1] == _POLICY_BASE_DIM + _TROT_CLOCK_DIM:
+        if getattr(env.cfg.observations.policy, "trot_clock", None) is None:
+            raise ValueError("A 49-D custom-dog policy must define trot_clock")
+        # Sagittal reflection swaps FR<->FL and RR<->RL.
+        mirrored[..., 45:49] = observation[..., 45:49].index_select(
+            -1, torch.tensor((1, 0, 3, 2), device=observation.device)
+        )
     return mirrored
 
 
 def _mirror_critic_observation(env, observation: torch.Tensor) -> torch.Tensor:
-    valid_dims = (_CRITIC_BASE_DIM, _CRITIC_BASE_DIM + _GAIT_PHASE_DIM)
+    valid_dims = (
+        _CRITIC_BASE_DIM,
+        _CRITIC_BASE_DIM + _GAIT_PHASE_DIM,
+        _CRITIC_BASE_DIM + _TROT_CLOCK_DIM,
+    )
     if observation.shape[-1] not in valid_dims:
         raise ValueError(
             f"Custom-dog critic symmetry expects one of {valid_dims}, got {observation.shape[-1]}"
@@ -114,6 +130,10 @@ def _mirror_critic_observation(env, observation: torch.Tensor) -> torch.Tensor:
     mirrored[..., 48:60] = _mirror_joint_data(env, observation[..., 48:60])
     if observation.shape[-1] == _CRITIC_BASE_DIM + _GAIT_PHASE_DIM:
         mirrored[..., 60:62] = -observation[..., 60:62]
+    elif observation.shape[-1] == _CRITIC_BASE_DIM + _TROT_CLOCK_DIM:
+        mirrored[..., 60:64] = observation[..., 60:64].index_select(
+            -1, torch.tensor((1, 0, 3, 2), device=observation.device)
+        )
     return mirrored
 
 

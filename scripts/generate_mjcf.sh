@@ -10,6 +10,15 @@ mjcf="${model_dir}/custom_dog.xml"
 unitree_mjcf="${model_dir}/custom_dog_unitree.xml"
 
 if [[ -z "${conda_exe}" ]]; then
+    for candidate in "${HOME}/miniconda3/bin/conda" "${HOME}/anaconda3/bin/conda" /opt/conda/bin/conda; do
+        if [[ -x "${candidate}" ]]; then
+            conda_exe="${candidate}"
+            break
+        fi
+    done
+fi
+
+if [[ -z "${conda_exe}" ]]; then
     echo "Conda was not found. Set CONDA_EXE or run setup_ubuntu2204.sh." >&2
     exit 1
 fi

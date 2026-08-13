@@ -17,6 +17,104 @@ if TYPE_CHECKING:
 HIP_JOINT_NAMES = ("FR_hip_joint", "FL_hip_joint", "RR_hip_joint", "RL_hip_joint")
 
 
+def _desired_trot_stance(
+    env: "ManagerBasedRLEnv",
+    command_name: str,
+    command_threshold: float,
+    duty_factor: float,
+    min_frequency: float,
+    max_frequency: float,
+    full_speed: float,
+    yaw_speed_scale: float,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Build the FR/FL/RR/RL diagonal trot schedule shared by gait rewards."""
+
+    if not 0.0 < duty_factor < 1.0:
+        raise ValueError("duty_factor must be in (0, 1)")
+    from .observations import command_trot_phase
+
+    phase, moving = command_trot_phase(
+        env,
+        command_name=command_name,
+        command_threshold=command_threshold,
+        min_frequency=min_frequency,
+        max_frequency=max_frequency,
+        full_speed=full_speed,
+        yaw_speed_scale=yaw_speed_scale,
+    )
+    offsets = phase.new_tensor((0.0, 0.5, 0.5, 0.0))
+    foot_phase = torch.remainder(phase.unsqueeze(1) + offsets.unsqueeze(0), 1.0)
+    return foot_phase < duty_factor, moving
+
+
+def trot_contact_schedule(
+    env: "ManagerBasedRLEnv",
+    sensor_cfg: SceneEntityCfg,
+    command_name: str = "base_velocity",
+    command_threshold: float = 0.1,
+    duty_factor: float = 0.52,
+    min_frequency: float = 1.4,
+    max_frequency: float = 3.2,
+    full_speed: float = 3.0,
+    yaw_speed_scale: float = 0.35,
+) -> torch.Tensor:
+    """Reward matching the desired diagonal trot contact state."""
+
+    contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
+    desired_stance, moving = _desired_trot_stance(
+        env,
+        command_name,
+        command_threshold,
+        duty_factor,
+        min_frequency,
+        max_frequency,
+        full_speed,
+        yaw_speed_scale,
+    )
+    is_contact = contact_sensor.data.current_contact_time[:, sensor_cfg.body_ids] > 0.0
+    return torch.mean((desired_stance == is_contact).float(), dim=1) * moving
+
+
+def trot_stance_swing_tracking(
+    env: "ManagerBasedRLEnv",
+    sensor_cfg: SceneEntityCfg,
+    asset_cfg: SceneEntityCfg,
+    command_name: str = "base_velocity",
+    command_threshold: float = 0.1,
+    duty_factor: float = 0.52,
+    min_frequency: float = 1.4,
+    max_frequency: float = 3.2,
+    full_speed: float = 3.0,
+    yaw_speed_scale: float = 0.35,
+    stance_velocity_std: float = 0.35,
+    swing_force_std: float = 25.0,
+) -> torch.Tensor:
+    """Keep scheduled stance feet still and scheduled swing feet unloaded."""
+
+    if stance_velocity_std <= 0.0 or swing_force_std <= 0.0:
+        raise ValueError("trot tracking standard deviations must be positive")
+    asset = env.scene[asset_cfg.name]
+    contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
+    desired_stance, moving = _desired_trot_stance(
+        env,
+        command_name,
+        command_threshold,
+        duty_factor,
+        min_frequency,
+        max_frequency,
+        full_speed,
+        yaw_speed_scale,
+    )
+    foot_speed = torch.linalg.vector_norm(
+        asset.data.body_lin_vel_w[:, asset_cfg.body_ids, :2], dim=2
+    )
+    vertical_force = torch.abs(contact_sensor.data.net_forces_w[:, sensor_cfg.body_ids, 2])
+    stance_score = torch.exp(-torch.square(foot_speed / stance_velocity_std))
+    swing_score = torch.exp(-torch.square(vertical_force / swing_force_std))
+    score = torch.where(desired_stance, stance_score, swing_score)
+    return torch.mean(score, dim=1) * moving
+
+
 def joint_deviation_l2(
     env: "ManagerBasedRLEnv",
     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),

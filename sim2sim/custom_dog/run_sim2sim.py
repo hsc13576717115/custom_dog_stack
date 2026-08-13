@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import csv
 import math
+import threading
 import time
 from pathlib import Path
 from threading import Lock
@@ -42,6 +43,7 @@ BASE_OBSERVATIONS = [
 SUPPORTED_OBSERVATIONS = (
     BASE_OBSERVATIONS,
     BASE_OBSERVATIONS + ["gait_phase"],
+    BASE_OBSERVATIONS + ["trot_clock"],
     BASE_OBSERVATIONS + ["base_lin_vel_xy"],
 )
 
@@ -112,7 +114,7 @@ class PolicyController:
         if self.observation_names not in SUPPORTED_OBSERVATIONS:
             raise ValueError(
                 "Observation contract mismatch: expected the 45-D base terms with an optional "
-                "final gait_phase or base_lin_vel_xy term, "
+                "final gait_phase, trot_clock or base_lin_vel_xy term, "
                 f"got {self.observation_names}"
             )
 
@@ -403,6 +405,31 @@ class PolicyController:
             if np.linalg.norm(self.policy_command) <= command_threshold:
                 gait_phase.fill(0.0)
             raw_terms["gait_phase"] = gait_phase
+        if "trot_clock" in self.observation_names:
+            clock_cfg = self.cfg["observations"]["trot_clock"]["params"]
+            command_threshold = float(clock_cfg.get("command_threshold", 0.1))
+            min_frequency = float(clock_cfg.get("min_frequency", 1.4))
+            max_frequency = float(clock_cfg.get("max_frequency", 3.2))
+            full_speed = float(clock_cfg.get("full_speed", 3.0))
+            yaw_speed_scale = float(clock_cfg.get("yaw_speed_scale", 0.35))
+            if (
+                command_threshold < 0.0
+                or min_frequency <= 0.0
+                or max_frequency < min_frequency
+                or full_speed <= 0.0
+                or yaw_speed_scale < 0.0
+            ):
+                raise ValueError("invalid trot_clock parameters")
+            motion_speed = np.linalg.norm(self.policy_command[:2])
+            motion_speed += yaw_speed_scale * abs(self.policy_command[2])
+            blend = float(np.clip(motion_speed / full_speed, 0.0, 1.0))
+            frequency = min_frequency + blend * (max_frequency - min_frequency)
+            phase = (self.phase_steps * float(self.cfg["step_dt"]) * frequency) % 1.0
+            foot_phase = (phase + np.array([0.0, 0.5, 0.5, 0.0])) % 1.0
+            trot_clock = np.sin(2.0 * math.pi * foot_phase)
+            if motion_speed <= command_threshold:
+                trot_clock.fill(0.0)
+            raw_terms["trot_clock"] = trot_clock
         observation = np.concatenate(
             [
                 self._history_term(name, self._scaled_term(name, raw_terms[name]))
@@ -720,6 +747,7 @@ def run(args: argparse.Namespace) -> None:
     total_steps = None if args.duration == 0 else int(np.ceil(args.duration / model.opt.timestep))
     started = time.perf_counter()
     viewer_handle = None
+    viewer_thread = None
     interactive_initial_mode = (
         InteractiveControls.VELOCITY
         if args.initial_state == "prone" and controller is not None
@@ -731,11 +759,19 @@ def run(args: argparse.Namespace) -> None:
     if args.viewer:
         from mujoco import viewer
 
+        existing_threads = set(threading.enumerate())
         viewer_handle = viewer.launch_passive(
             model,
             data,
             key_callback=interactive_controls.key_callback if interactive_controls is not None else None,
         )
+        new_threads = [
+            thread
+            for thread in threading.enumerate()
+            if thread not in existing_threads and thread is not threading.current_thread()
+        ]
+        if len(new_threads) == 1:
+            viewer_thread = new_threads[0]
         if args.camera_mode == "tracking":
             with viewer_handle.lock():
                 viewer_handle.cam.type = mujoco.mjtCamera.mjCAMERA_TRACKING
@@ -1015,6 +1051,10 @@ def run(args: argparse.Namespace) -> None:
     finally:
         if viewer_handle is not None:
             viewer_handle.close()
+        if viewer_thread is not None:
+            viewer_thread.join(timeout=5.0)
+            if viewer_thread.is_alive():
+                raise RuntimeError("MuJoCo viewer did not close within 5 seconds")
         if controller is not None:
             controller.close()
 

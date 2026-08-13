@@ -3367,6 +3367,180 @@ class RobotOmni45V2PlayEnvCfg(RobotOmni45V2EnvCfg):
 
 
 @configclass
+class RobotOmni45HighSpeedEnvCfg(RobotOmni45V2EnvCfg):
+    """Expand the converged signed omni policy to the target joystick limits."""
+
+    def __post_init__(self):
+        super().__post_init__()
+
+        command = self.commands.base_velocity
+        # model_4960 already covers this envelope. Starting here avoids both a
+        # needless easy stage and an abrupt jump to out-of-distribution speeds.
+        command.ranges = command.Ranges(
+            lin_vel_x=(-1.0, 1.0),
+            lin_vel_y=(-0.4, 0.4),
+            ang_vel_z=(-1.0, 1.0),
+        )
+        command.limit_ranges = command.Ranges(
+            lin_vel_x=(-3.0, 3.0),
+            lin_vel_y=(-0.6, 0.6),
+            ang_vel_z=(-2.0, 2.0),
+        )
+        command.bucket_probabilities = (0.30, 0.20, 0.20, 0.30)
+        command.rel_standing_envs = 0.05
+
+        curriculum = self.curriculum.omni_velocity_cmd_levels
+        curriculum.params["increments"] = (0.25, 0.05, 0.10)
+        curriculum.params["lin_success_threshold"] = 0.72
+        curriculum.params["yaw_success_threshold"] = 0.72
+
+        # High-speed combinations need stronger tracking without removing the
+        # existing posture, contact, and action-smoothness objectives.
+        self.rewards.track_lin_vel_xy.weight = 4.0
+        self.rewards.track_ang_vel_z.weight = 2.0
+        self.rewards.track_velocity_components_relative_l1.weight = -0.75
+        self.rewards.track_velocity_components_relative_l1.params["axis_weights"] = (
+            1.0,
+            1.35,
+            1.15,
+        )
+        self.rewards.track_ang_vel_z_l2.weight = -0.75
+
+
+@configclass
+class RobotOmni45HighSpeedPlayEnvCfg(RobotOmni45HighSpeedEnvCfg):
+    def __post_init__(self):
+        super().__post_init__()
+        self.scene.num_envs = 32
+        self.scene.terrain.terrain_generator.num_rows = 2
+        self.scene.terrain.terrain_generator.num_cols = 1
+        self.commands.base_velocity.ranges = self.commands.base_velocity.limit_ranges
+
+
+@configclass
+class RobotOmniTrotEnvCfg(RobotOmni45V2EnvCfg):
+    """From-scratch all-direction controller with an explicit diagonal trot."""
+
+    def __post_init__(self):
+        super().__post_init__()
+
+        gait_params = {
+            "command_name": "base_velocity",
+            "command_threshold": 0.08,
+            "min_frequency": 1.4,
+            "max_frequency": 3.2,
+            "full_speed": 3.0,
+            "yaw_speed_scale": 0.35,
+        }
+        self.observations.policy.trot_clock = ObsTerm(
+            func=custom_mdp.command_trot_clock,
+            params=gait_params,
+        )
+        self.observations.critic.trot_clock = ObsTerm(
+            func=custom_mdp.command_trot_clock,
+            params=gait_params,
+        )
+
+        # Start with a learnable signed envelope and expand symmetrically to
+        # the joystick contract only after planar and yaw tracking succeed.
+        command = self.commands.base_velocity
+        command.ranges = command.Ranges(
+            lin_vel_x=(-0.8, 0.8),
+            lin_vel_y=(-0.15, 0.15),
+            ang_vel_z=(-0.4, 0.4),
+        )
+        command.limit_ranges = command.Ranges(
+            lin_vel_x=(-3.0, 3.0),
+            lin_vel_y=(-0.6, 0.6),
+            ang_vel_z=(-2.0, 2.0),
+        )
+        command.bucket_probabilities = (0.35, 0.20, 0.20, 0.25)
+        command.negative_x_probability = 0.50
+        command.rel_low_speed_x = 0.25
+        command.low_speed_x_range = (0.15, 0.45)
+        command.rel_standing_envs = 0.08
+
+        curriculum = self.curriculum.omni_velocity_cmd_levels
+        curriculum.params.update(
+            {
+                "increments": (0.25, 0.05, 0.10),
+                "lin_success_threshold": 0.72,
+                "yaw_success_threshold": 0.72,
+            }
+        )
+
+        feet_cfg = SceneEntityCfg(
+            "robot",
+            body_names=["FR_foot", "FL_foot", "RR_foot", "RL_foot"],
+            preserve_order=True,
+        )
+        contact_cfg = SceneEntityCfg(
+            "contact_forces",
+            body_names=["FR_foot", "FL_foot", "RR_foot", "RL_foot"],
+            preserve_order=True,
+        )
+        gait_reward_params = {
+            **gait_params,
+            "duty_factor": 0.52,
+            "sensor_cfg": contact_cfg,
+        }
+        self.rewards.trot_contact_schedule = RewTerm(
+            func=custom_mdp.trot_contact_schedule,
+            weight=1.5,
+            params=gait_reward_params,
+        )
+        self.rewards.trot_stance_swing_tracking = RewTerm(
+            func=custom_mdp.trot_stance_swing_tracking,
+            weight=1.0,
+            params={
+                **gait_reward_params,
+                "asset_cfg": feet_cfg,
+                "stance_velocity_std": 0.35,
+                "swing_force_std": 25.0,
+            },
+        )
+
+        self.rewards.track_lin_vel_xy.weight = 4.0
+        self.rewards.track_ang_vel_z.weight = 2.0
+        self.rewards.track_velocity_components_relative_l1.weight = -0.75
+        self.rewards.track_velocity_components_relative_l1.params["axis_weights"] = (
+            1.0,
+            1.30,
+            1.15,
+        )
+        self.rewards.track_ang_vel_z_l2.weight = -0.75
+
+        # A soft height target prevents the low-body shortcut while allowing
+        # the robot to crouch modestly as planar/yaw demand rises.
+        self.rewards.speed_adaptive_base_height = RewTerm(
+            func=custom_mdp.speed_adaptive_base_height_l2,
+            weight=-4.0,
+            params={
+                "standing_height": 0.31,
+                "crouched_height": 0.26,
+                "crouch_start_speed": 0.7,
+                "crouch_full_speed": 3.0,
+                "yaw_speed_scale": 0.35,
+                "command_name": "base_velocity",
+            },
+        )
+        self.rewards.flat_orientation_l2.weight = -3.0
+        self.rewards.base_angular_velocity.weight = -0.08
+        self.rewards.feet_air_time.weight = 0.0
+        self.rewards.air_time_variance.weight = 0.0
+
+
+@configclass
+class RobotOmniTrotPlayEnvCfg(RobotOmniTrotEnvCfg):
+    def __post_init__(self):
+        super().__post_init__()
+        self.scene.num_envs = 32
+        self.scene.terrain.terrain_generator.num_rows = 2
+        self.scene.terrain.terrain_generator.num_cols = 1
+        self.commands.base_velocity.ranges = self.commands.base_velocity.limit_ranges
+
+
+@configclass
 class RobotOmni45V3PolishEnvCfg(RobotOmni45V2EnvCfg):
     """Refine the converged Omni-45 gait without changing its policy contract."""
 

@@ -630,6 +630,32 @@ gym.register(
 )
 
 gym.register(
+    id="CustomDog-Velocity-Omni45-HighSpeed-v1",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.velocity_env_cfg:RobotOmni45HighSpeedEnvCfg",
+        "play_env_cfg_entry_point": (
+            f"{__name__}.velocity_env_cfg:RobotOmni45HighSpeedPlayEnvCfg"
+        ),
+        "rsl_rl_cfg_entry_point": (
+            "custom_dog_rl.agents.ppo_cfg:CustomDogOmni45HighSpeedPPORunnerCfg"
+        ),
+    },
+)
+
+gym.register(
+    id="CustomDog-Velocity-OmniTrot-v1",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.velocity_env_cfg:RobotOmniTrotEnvCfg",
+        "play_env_cfg_entry_point": f"{__name__}.velocity_env_cfg:RobotOmniTrotPlayEnvCfg",
+        "rsl_rl_cfg_entry_point": "custom_dog_rl.agents.ppo_cfg:CustomDogOmniTrotPPORunnerCfg",
+    },
+)
+
+gym.register(
     id="CustomDog-Velocity-Omni45-Polish-v3",
     entry_point="isaaclab.envs:ManagerBasedRLEnv",
     disable_env_checker=True,

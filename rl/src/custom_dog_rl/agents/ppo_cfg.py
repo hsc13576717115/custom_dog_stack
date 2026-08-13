@@ -130,6 +130,37 @@ class CustomDogOmni45V2PPORunnerCfg(CustomDogOmniSymmetryPPORunnerCfg):
 
 
 @configclass
+class CustomDogOmni45HighSpeedPPORunnerCfg(CustomDogOmni45V2PPORunnerCfg):
+    """Conservative continuation from the converged Omni45-v2 controller."""
+
+    def __post_init__(self):
+        super().__post_init__()
+        self.save_interval = 20
+        self.policy.init_noise_std = 0.35
+        self.algorithm.learning_rate = 1.0e-4
+        self.algorithm.schedule = "adaptive"
+        self.algorithm.num_learning_epochs = 4
+        self.algorithm.entropy_coef = 0.002
+        self.algorithm.desired_kl = 0.006
+
+
+@configclass
+class CustomDogOmniTrotPPORunnerCfg(CustomDogOmniSymmetryPPORunnerCfg):
+    """From-scratch PPO for the 49-D speed-adaptive diagonal-trot policy."""
+
+    def __post_init__(self):
+        super().__post_init__()
+        self.num_steps_per_env = 32
+        self.save_interval = 20
+        self.policy.init_noise_std = 0.6
+        self.algorithm.learning_rate = 5.0e-4
+        self.algorithm.schedule = "adaptive"
+        self.algorithm.num_learning_epochs = 5
+        self.algorithm.entropy_coef = 0.006
+        self.algorithm.desired_kl = 0.01
+
+
+@configclass
 class CustomDogOmni45V3PolishPPORunnerCfg(CustomDogOmni45V2PPORunnerCfg):
     """Low-rate mirror-regularized refinement of a converged 45-D policy."""
 

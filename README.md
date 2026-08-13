@@ -175,6 +175,11 @@ cd /home/hsc/custom_dog_stack
 http://localhost:6006
 ```
 
+在当前 RTX 4060 Laptop GPU（8 GiB）的 Ubuntu 22.04 环境中，`./scripts/train.sh`
+默认同时使用 CUDA 物理仿真和 CUDA PPO，并启动 4096 个并行环境。该配置已经完成
+多轮采样和 PPO 更新验证，实测约为 36,000--43,000 steps/s。6144 个环境虽然可以
+创建场景，但在 8 GiB 显存上会在首次 PPO 更新时发生 CUDA OOM，因此不应作为默认值。
+
 先进行 100 轮短训练：
 
 ```bash
@@ -204,6 +209,17 @@ Policy/mean_noise_std
 观测和动作维度正确、checkpoint 持续保存。
 
 ## 4. 正式长训练
+
+当前推荐的显式对角 Trot 主线使用 49 维策略观测（45 维基础观测加 FR/FL/RR/RL
+四腿时钟），从低速全向范围自动扩展到 `vx +/-3.0 m/s`、`vy +/-0.6 m/s`、
+`wz +/-2.0 rad/s`：
+
+```bash
+./scripts/train_omni_trot.sh
+```
+
+该任务从随机初始化训练，不兼容 45/47 维旧 checkpoint。四腿顺序显式固定为
+`FR, FL, RR, RL`，其中 `FR+RL` 和 `FL+RR` 为两组交替对角腿。
 
 短训练不再出现 Python、URDF、CUDA/PyTorch 或环境创建错误后，再启动长训练：
 
@@ -456,7 +472,7 @@ CUSTOM_DOG_MAX_ITERATIONS=1 \
 cd /home/hsc/custom_dog_stack
 OMNI_KIT_ACCEPT_EULA=YES \
 CUSTOM_DOG_TASK=CustomDog-Velocity-Omni45-v2 \
-CUSTOM_DOG_NUM_ENVS=128 \
+CUSTOM_DOG_NUM_ENVS=4096 \
 CUSTOM_DOG_MAX_ITERATIONS=5000 \
 ./scripts/train.sh --run_name omni45_v2_main
 ```
