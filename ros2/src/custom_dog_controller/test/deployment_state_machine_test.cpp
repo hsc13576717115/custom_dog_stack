@@ -67,5 +67,52 @@ int main() {
   output = state_machine.update(13.02, request);
   expect(output.mode == DeploymentMode::kPassive);
   expect(!output.motors_enabled);
+
+  DeploymentStateMachine recovery_machine;
+  custom_dog_controller::RecoveryTelemetry upright;
+  upright.valid = true;
+  upright.height_m = 0.28;
+  upright.tilt_rad = 0.10;
+  upright.angular_speed_rad_s = 0.10;
+  upright.foot_contacts.fill(true);
+  recovery_machine.begin_recovery(0.0);
+  output = recovery_machine.update(0.0, request, upright);
+  expect(output.mode == DeploymentMode::kUprightDwell);
+  expect(output.use_policy);
+  expect(output.use_recovery_policy == false);
+  expect(close(output.velocity_command[0], 0.0F));
+
+  output = recovery_machine.update(0.2, request, upright);
+  expect(output.mode == DeploymentMode::kUprightDwell);
+  expect(!output.reset_policy_history);
+
+  output = recovery_machine.update(0.4, request, upright);
+  expect(output.mode == DeploymentMode::kPolicyHold);
+  expect(output.reset_policy_history);
+  expect(close(output.velocity_command[0], 0.0F));
+
+  output = recovery_machine.update(0.41, request, upright);
+  expect(output.mode == DeploymentMode::kPolicyHold);
+  expect(!output.reset_policy_history);
+  output = recovery_machine.update(1.41, request, upright);
+  expect(output.mode == DeploymentMode::kVelocity);
+  expect(close(output.velocity_command[0], request[0]));
+
+  DeploymentStateMachine timeout_machine;
+  timeout_machine.begin_recovery(0.0);
+  output = timeout_machine.update(7.0, request, custom_dog_controller::RecoveryTelemetry{});
+  expect(output.mode == DeploymentMode::kPassive);
+  expect(!output.motors_enabled);
+
+  DeploymentStateMachine dropout_machine;
+  dropout_machine.begin_recovery(0.0);
+  output = dropout_machine.update(0.0, request, upright);
+  expect(output.mode == DeploymentMode::kUprightDwell);
+  auto lost_contact = upright;
+  lost_contact.foot_contacts[2] = false;
+  output = dropout_machine.update(0.1, request, lost_contact);
+  expect(output.mode == DeploymentMode::kRecoveryPolicy);
+  expect(output.use_recovery_policy);
+  expect(output.reset_policy_history);
   return 0;
 }

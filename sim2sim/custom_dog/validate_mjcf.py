@@ -29,6 +29,7 @@ HOME_POSITION = np.array(
     [-0.1, 0.8, -1.5, 0.1, 0.8, -1.5, -0.1, 0.8, -1.5, 0.1, 0.8, -1.5],
     dtype=np.float64,
 )
+JOINT_FRICTION_LOSS_NM = 0.01
 
 
 def names(model: mujoco.MjModel, object_type: mujoco.mjtObj, count: int) -> list[str]:
@@ -66,10 +67,12 @@ def main() -> None:
     assert abs(model.opt.timestep - 0.005) < 1e-12
     assert abs(float(model.body_mass.sum()) - 13.84916) < 1e-5, model.body_mass.sum()
     for actuator_id, joint_name in enumerate(SDK_JOINT_ORDER):
-        if not joint_name.endswith("_calf_joint"):
-            continue
         joint_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, joint_name)
         assert joint_id >= 0, joint_name
+        dof_id = model.jnt_dofadr[joint_id]
+        assert abs(model.dof_frictionloss[dof_id] - JOINT_FRICTION_LOSS_NM) < 1e-12, joint_name
+        if not joint_name.endswith("_calf_joint"):
+            continue
         assert np.allclose(
             model.actuator_ctrlrange[actuator_id], model.jnt_range[joint_id], atol=1e-9
         ), (joint_name, model.actuator_ctrlrange[actuator_id], model.jnt_range[joint_id])

@@ -163,6 +163,9 @@ def main() -> None:
     if "trot_clock" in obs_cfg:
         clock_cfg = obs_cfg["trot_clock"]["params"]
         threshold = float(clock_cfg.get("command_threshold", 0.1))
+        yaw_threshold = clock_cfg.get("yaw_command_threshold")
+        if yaw_threshold is not None:
+            yaw_threshold = float(yaw_threshold)
         min_frequency = float(clock_cfg.get("min_frequency", 1.4))
         max_frequency = float(clock_cfg.get("max_frequency", 3.2))
         full_speed = float(clock_cfg.get("full_speed", 3.0))
@@ -174,7 +177,13 @@ def main() -> None:
         phase = np.arange(len(rows), dtype=np.float64) * float(cfg["step_dt"]) * frequency
         foot_phase = (phase[:, np.newaxis] + np.asarray((0.0, 0.5, 0.5, 0.0))) % 1.0
         trot_clock = np.sin(2.0 * np.pi * foot_phase)
-        trot_clock[motion_speed <= threshold] = 0.0
+        if yaw_threshold is None:
+            moving = motion_speed > threshold
+        else:
+            moving = (np.linalg.norm(calibrated_command[:, :2], axis=1) > threshold) | (
+                np.abs(calibrated_command[:, 2]) > yaw_threshold
+            )
+        trot_clock[~moving] = 0.0
         raw_terms["trot_clock"] = observation_term(trot_clock, obs_cfg["trot_clock"])
     if "base_lin_vel_xy" in obs_cfg:
         assert base_lin_vel is not None

@@ -71,6 +71,22 @@ class CustomDogRecoveryPPORunnerCfg(CustomDogPPORunnerCfg):
 
 
 @configclass
+class CustomDogSelfRightingPPORunnerCfg(CustomDogPPORunnerCfg):
+    """From-scratch exploration settings for a separate recovery actor."""
+
+    def __post_init__(self):
+        super().__post_init__()
+        self.max_iterations = 2000
+        self.save_interval = 25
+        self.policy.init_noise_std = 0.8
+        self.algorithm.learning_rate = 5.0e-4
+        self.algorithm.schedule = "adaptive"
+        self.algorithm.entropy_coef = 0.01
+        self.algorithm.num_learning_epochs = 5
+        self.algorithm.desired_kl = 0.01
+
+
+@configclass
 class CustomDogOmniPPORunnerCfg(CustomDogPPORunnerCfg):
     """Exploratory adaptation settings for standing-start omni pretraining."""
 
@@ -158,6 +174,162 @@ class CustomDogOmniTrotPPORunnerCfg(CustomDogOmniSymmetryPPORunnerCfg):
         self.algorithm.num_learning_epochs = 5
         self.algorithm.entropy_coef = 0.006
         self.algorithm.desired_kl = 0.01
+
+
+@configclass
+class CustomDogOmniTrotClosedLoopFoundationPPORunnerCfg(CustomDogOmniTrotPPORunnerCfg):
+    """From-scratch PPO for the 51-D trot plus velocity-feedback teacher."""
+
+    def __post_init__(self):
+        super().__post_init__()
+        self.save_interval = 25
+        self.policy.init_noise_std = 0.5
+        self.algorithm.learning_rate = 5.0e-4
+        self.algorithm.schedule = "adaptive"
+        self.algorithm.num_learning_epochs = 5
+        self.algorithm.entropy_coef = 0.005
+        self.algorithm.desired_kl = 0.01
+
+
+@configclass
+class CustomDogStandExpertPPORunnerCfg(CustomDogOmniTrotClosedLoopFoundationPPORunnerCfg):
+    """From-scratch PPO for the zero-command upright support expert."""
+
+    def __post_init__(self):
+        super().__post_init__()
+        self.save_interval = 25
+        self.policy.init_noise_std = 0.35
+        self.algorithm.learning_rate = 5.0e-4
+        self.algorithm.schedule = "adaptive"
+        self.algorithm.num_learning_epochs = 5
+        self.algorithm.entropy_coef = 0.003
+        self.algorithm.desired_kl = 0.008
+
+
+@configclass
+class CustomDogStandHeightCalibratedPPORunnerCfg(CustomDogStandExpertPPORunnerCfg):
+    """Conservative continuation for the measured standing-height transfer offset."""
+
+    def __post_init__(self):
+        super().__post_init__()
+        self.save_interval = 10
+        self.policy.init_noise_std = 0.12
+        self.algorithm.learning_rate = 5.0e-5
+        self.algorithm.num_learning_epochs = 3
+        self.algorithm.entropy_coef = 0.001
+        self.algorithm.desired_kl = 0.005
+
+
+@configclass
+class CustomDogOmniTrotClosedLoopPolishPPORunnerCfg(CustomDogOmniTrotPPORunnerCfg):
+    """Conservative continuation for the Stage-A yaw and standing corrections."""
+
+    def __post_init__(self):
+        super().__post_init__()
+        self.save_interval = 10
+        self.policy.init_noise_std = 0.18
+        self.algorithm.learning_rate = 3.0e-5
+        self.algorithm.schedule = "fixed"
+        self.algorithm.num_learning_epochs = 3
+        self.algorithm.entropy_coef = 0.0005
+        self.algorithm.desired_kl = 0.003
+
+
+@configclass
+class CustomDogOmniTrotRobustStandFixPPORunnerCfg(
+    CustomDogOmniTrotClosedLoopPolishPPORunnerCfg
+):
+    """Very conservative zero-command refinement of the robust 51-D teacher."""
+
+    def __post_init__(self):
+        super().__post_init__()
+        self.save_interval = 10
+        self.policy.init_noise_std = 0.10
+        self.algorithm.learning_rate = 1.0e-5
+        self.algorithm.schedule = "fixed"
+        self.algorithm.num_learning_epochs = 2
+        self.algorithm.entropy_coef = 1.0e-4
+        self.algorithm.desired_kl = 0.0015
+
+
+@configclass
+class CustomDogOmniTrotClosedLoopCrossPhysicsPPORunnerCfg(
+    CustomDogOmniTrotClosedLoopPolishPPORunnerCfg
+):
+    """Continuation runner for adapting A2 across bounded physics variation."""
+
+    def __post_init__(self):
+        super().__post_init__()
+        self.save_interval = 20
+        self.policy.init_noise_std = 0.25
+        self.algorithm.learning_rate = 5.0e-5
+        self.algorithm.num_learning_epochs = 4
+        self.algorithm.entropy_coef = 0.001
+        self.algorithm.desired_kl = 0.005
+
+
+@configclass
+class CustomDogOmniTrotClosedLoopExpansionPPORunnerCfg(
+    CustomDogOmniTrotClosedLoopCrossPhysicsPPORunnerCfg
+):
+    """Moderate exploration for gated B/C/D command-envelope expansion."""
+
+    def __post_init__(self):
+        super().__post_init__()
+        self.save_interval = 25
+        self.policy.init_noise_std = 0.35
+        self.algorithm.learning_rate = 1.0e-4
+        self.algorithm.schedule = "adaptive"
+        self.algorithm.num_learning_epochs = 4
+        self.algorithm.entropy_coef = 0.003
+        self.algorithm.desired_kl = 0.008
+
+
+@configclass
+class CustomDogDynamicsTeacherPPORunnerCfg(
+    CustomDogOmniTrotClosedLoopExpansionPPORunnerCfg
+):
+    """Adapt an accepted 51-D gait policy to 11 privileged dynamics values."""
+
+    def __post_init__(self):
+        super().__post_init__()
+        # The 62-D context does not have a validated mirror mapping.  Keep the
+        # inherited policy weights and train without an invalid symmetry loss.
+        self.algorithm.symmetry_cfg = None
+        self.save_interval = 25
+        self.policy.init_noise_std = 0.25
+        self.algorithm.learning_rate = 5.0e-5
+        self.algorithm.schedule = "adaptive"
+        self.algorithm.num_learning_epochs = 4
+        self.algorithm.entropy_coef = 0.001
+        self.algorithm.desired_kl = 0.005
+
+
+@configclass
+class CustomDogOmniTrotPosturePPORunnerCfg(CustomDogOmniTrotPPORunnerCfg):
+    """Low-rate posture and pure-yaw refinement of a converged trot policy."""
+
+    def __post_init__(self):
+        super().__post_init__()
+        self.save_interval = 10
+        self.policy.init_noise_std = 0.25
+        self.algorithm.learning_rate = 5.0e-5
+        self.algorithm.schedule = "fixed"
+        self.algorithm.num_learning_epochs = 3
+        self.algorithm.entropy_coef = 0.001
+        self.algorithm.desired_kl = 0.004
+
+
+@configclass
+class CustomDogOmniTrotRefinePPORunnerCfg(CustomDogOmniTrotPosturePPORunnerCfg):
+    """Conservative continuation for low-speed gait and posture refinement."""
+
+    def __post_init__(self):
+        super().__post_init__()
+        self.policy.init_noise_std = 0.18
+        self.algorithm.learning_rate = 3.0e-5
+        self.algorithm.entropy_coef = 0.0005
+        self.algorithm.desired_kl = 0.003
 
 
 @configclass
@@ -391,6 +563,16 @@ class CustomDogHistory213DistillationRunnerCfg(RslRlDistillationRunnerCfg):
         loss_type="huber",
         optimizer="adam",
     )
+
+
+@configclass
+class CustomDogClosedLoopHistory213DistillationRunnerCfg(
+    CustomDogHistory213DistillationRunnerCfg
+):
+    """Distill the 51-D trot/velocity teacher into the 213-D history actor."""
+
+    max_iterations = 800
+    save_interval = 25
 
 
 @configclass

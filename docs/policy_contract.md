@@ -1,6 +1,6 @@
-# Policy Contract v2.3
+# Policy Contract v2.4
 
-控制周期为 0.02 s，即 50 Hz。现有 Actor 输入可能是 45、47 或 213 个浮点数，
+控制周期为 0.02 s，即 50 Hz。现有 Actor 输入可能是 45、47、49、51、62 或 213 个浮点数，
 输出始终是 12 个浮点数。
 准确的 observation 列表必须从候选自己的 `deploy.yaml` 读取，不能根据模型文件名猜测。
 
@@ -16,6 +16,9 @@
 | 33..44 | previous policy action | 12 | 1.0 |
 | 45..46 | optional gait phase: sin/cos | 2 | 1.0 |
 | 45..46 | optional base-frame linear velocity: vx/vy | 2 | 1.0 |
+| 45..48 | optional trot clock: FR/FL/RR/RL | 4 | 1.0 |
+| 49..50 | optional base-frame linear velocity with trot clock: vx/vy | 2 | 1.0 |
+| 51..61 | privileged dynamics context (teacher only) | 11 | normalized |
 
 基础策略到索引 44 结束，共 45 维。47 维策略只能在末尾选择一种扩展，具体类型由候选
 `deploy.yaml` 中的 observation 名称决定，不能仅根据输入维度判断：
@@ -26,6 +29,16 @@
 `base_lin_vel_xy` 在 Isaac 和 MuJoCo 中可直接取得；实机 IMU 不能直接测量平移速度，
 ROS 2 部署必须接入经过时间同步和滤波的 IMU + 腿部运动学速度估计器。估计器完成前，
 这种 47 维策略只能作为 sim/sim2sim 实验候选，不能标记为实机就绪。
+
+51 维策略在基础 45 维之后依次追加 `trot_clock` 四维和 `base_lin_vel_xy` 两维。
+它保持显式对角 Trot，同时使用仿真中的真实平移速度闭环；和 47 维策略一样，在真实
+速度估计器完成前只能用于 sim/sim2sim。
+
+62 维策略在 51 维后追加 11 维特权动力学上下文：总质量、基座质心 xyz、执行器刚度与
+阻尼、关节摩擦、静/动摩擦材料、恢复系数以及当前执行器延迟。前 10 维在 startup
+随机化完成后记录，延迟因每次 reset 都会重采样而实时读取。这是 HIM/RMA 风格教师的
+训练接口，只用于仿真和蒸馏；硬件部署不得伪造这些量。MuJoCo 平地回归使用归一化的
+名义零上下文，最终必须由 213 维历史学生替代该教师。
 
 ### 213 维短历史策略
 
@@ -50,9 +63,16 @@ reset、FixStand 到 PolicyHold 的接管以及策略重新加载时必须清空
 `sum(len(scale) * history_length)` 计算。Python MuJoCo、trace 分析器和 C++
 `HistoryObservationBuilder` 都必须使用这一规则。
 
+最终 history student 的训练分布继承 T1：平地样本保留完整 Stage-D 指令范围，崎岖地形
+限制在 Stage-C 范围；教师的地形高度扫描只进入 critic，不进入 teacher actor 或 student。
+蒸馏时 62-D teacher actor 能看到特权动力学上下文，213-D student 只能从 100 ms 本体历史
+中推断其影响。当前蒸馏只替换 locomotion actor，零速仍由独立 stand actor 路由。因此“213 维输入可由
+现有传感器构建”不等同于整个 routed 候选已可实机部署；stand bias、路由器及历史清空合同
+还必须在 C++/ROS 2 中实现并单独验收。
+
 ## Deployment state machine
 
-趴下到站立不属于 RL policy。部署端固定执行：
+当前已验收的部署合同中，趴下到站立不属于 locomotion RL policy。部署端固定执行：
 
 ```text
 Prone/Passive
@@ -65,6 +85,51 @@ Prone/Passive
 必须取切换瞬间的 12 个实测关节角，不能假设机器人恰好位于标称趴姿。进入 PolicyHold
 时清空 `previous policy action` 和策略内部的 phase 计数。通信异常、越限或急停直接退出
 Velocity，进入硬件定义的 Passive/阻尼安全状态。
+
+仓库中的 `CustomDog-SelfRighting-R0/R1/R2-v2` 是独立的 recovery actor 实验合同，不能
+覆盖上述已验收流程。只有它依次通过 Isaac 选择性自碰撞、MuJoCo 腹/背/左右侧躺、扰动后
+连续稳定门槛，并完成安全绳实机试验后，部署状态机才允许扩展为：
+
+```text
+Fallen -> RecoveryPolicy -> UprightDwell(0.4 s) -> LocomotionPolicyHold -> Velocity
+```
+
+RecoveryPolicy 期间速度指令必须为零；成功切换要求机身高度至少 0.27 m、倾角不超过
+15 deg、角速度不超过 0.50 rad/s，并且四足连续接触 0.40 s。超时、关节/力矩越限或重复
+失败必须回到 Passive，不能自动循环尝试。
+
+ROS 2 `DeploymentStateMachine` 也提供同一状态接口：`begin_recovery()` 后，调用带
+`RecoveryTelemetry` 的 `update()`，输出通过 `use_recovery_policy` 选择恢复 ONNX。恢复成功
+进入 `UprightDwell`，任一接触/姿态条件丢失就退回恢复；超时进入 Passive。该接口只定义
+状态、安全门槛和策略历史重置，具体 ONNX Runtime 节点仍需在驱动层接入。
+
+MuJoCo 的完整交接验收使用 `scripts/evaluate_recovery_handoff.py`。它同时加载独立的
+RecoveryPolicy、stand/locomotion routed candidate，在 belly/back/left/right 四种初态逐一
+确认 `self_righting` 成功、RecoveryPolicy 到 locomotion 的 0.30 s 平滑交接、1 s 零速保持，
+以及最后才出现的 locomotion command release。单独的 `evaluate_self_righting_mujoco.py`
+只证明恢复策略本身，不能替代这个交接门槛。
+
+### Stand/locomotion routed candidate
+
+`closed_loop_stage_a_routed_seed42` 是两个 Actor 组成的 sim2sim 候选：零速附近使用独立
+stand policy，其余命令使用 locomotion policy。路由阈值从候选自己的 `routing.json` 读取：
+
+```text
+stand -> locomotion: planar speed >= 0.025 m/s or abs(wz) >= 0.040 rad/s
+locomotion -> stand: planar speed <= 0.015 m/s and abs(wz) <= 0.025 rad/s
+transition: 0.30 s quintic blend between the two raw policy actions
+```
+
+因此 `vx=0.03 m/s` 和 `abs(wz)=0.05 rad/s` 都会进入 locomotion policy 并抬脚；滞回区
+避免键盘指令或估计噪声导致两个 Actor 来回切换。切换时两个 Actor 各自保留独立的
+`previous action` 和 observation state，不能共享上一动作。
+
+stand 候选还可以声明 12 维 `constant_joint_target_bias`。它使用 policy joint order，在
+action scale/offset 后、`joint_ids_map` 前无条件加到目标关节角。当前验收值仅在 stand
+policy 中将四个 hip 对称地向内偏置 `0.04 rad`；locomotion policy 不使用该偏置。这个字段
+目前只在 Python MuJoCo runner 中实现，C++/ROS 2 还没有同合同实现，因此该 routed 候选
+只能标记为 sim/sim2sim 已验收，不能标记为实机就绪。最终 213-D student 应吸收或替代
+这个站立校准，不能把 Python 专用偏置当成永久硬件修正。
 
 ## Command path
 

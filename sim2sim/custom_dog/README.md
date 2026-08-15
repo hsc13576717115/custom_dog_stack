@@ -57,9 +57,9 @@ CUSTOM_DOG_INITIAL_STATE=prone ./scripts/teleop_mujoco_policy.sh
 ```
 
 窗口获得焦点后：`P` 进入 Passive（零力矩）；`R` 从当前关节角按默认 2 秒五次曲线
-插值到 home，随后自动交给零速度 ONNX PolicyHold；确认站稳后按 `V` 释放键盘速度指令。
-`W`/`S` 以每次
-`0.1 m/s` 调整前进速度，`A`/`D` 调整侧向速度，`Q`/`E` 调整偏航角速度，`X` 清零。
+插值到 home，随后自动交给零速度 ONNX PolicyHold；确认站稳后可直接输入速度指令。
+`W`/`S` 以每次 `0.1 m/s` 调整前进速度，`A`/`D` 调整侧向速度，`Q`/`E` 调整偏航
+角速度，`X` 清零并平滑进入 FixStand。
 默认加载 `model_800_omni_stability_calibrated`，其已验证外部范围为
 `vx=0~0.6 m/s`、`vy=+/-0.17 m/s`、`yaw=+/-0.6 rad/s`。
 
@@ -72,9 +72,9 @@ CUSTOM_DOG_CAMERA_MODE=free ./scripts/teleop_mujoco_policy.sh
 
 不要用 `Space` 或数字键切换机器人状态：MuJoCo 自己将 `Space` 用作播放/暂停，将
 `0..5` 用作几何显示分组。终端出现 `interactive mode=policy_hold` 才表示起身插值已经
-完成并由零速度策略接管；出现 `interactive mode=velocity` 后速度按键才会真正生效。
+完成并由零速度策略接管；此时按任一速度键会自动进入 Velocity。
 进入 `P` 或 `R` 会自动清零旧的三轴命令，防止再次进入 Velocity 时突然起步。
-在 Passive、FixStand 或 PolicyHold 中按速度键会被忽略。
+在 Passive 或 FixStand 中按速度键会被忽略。
 
 这是 Python MuJoCo 的仿真调试入口，不会通过 ROS 2 或 RS485 下发任何实机指令。
 
@@ -98,6 +98,12 @@ calf=`-161 deg`。
 这是固定的职责边界：趴下到站立完全属于部署状态机，RL policy 不负责起身。phase
 候选额外使用的 `sin/cos` 只是在 Velocity 状态中提供步态时钟，不参与五次曲线站立。
 
+R2 通过后还必须验证独立恢复策略到运动策略的真实交接。交接模式会在四种初态中先让
+RecoveryPolicy 只接收零速度指令，满足高度、姿态、角速度和四足接触保持门槛后，以
+`0.30 s` 平滑曲线交给 stand/locomotion routed candidate，继续零速度保持 `1.0 s`，最后
+才释放用户速度命令。对应门控命令由 `scripts/evaluate_recovery_handoff_gated.sh` 调用，
+不能用单独的 recovery 成功日志代替。
+
 输出的 `recovery` 行要求至少出现一次 `height >= 0.25 m` 且 `tilt <= 15 deg`，并会
 报告过渡期间的最大高度、倾角、实际执行器力和关节速度。这只是仿真验收门槛；实机状态机
 必须实现同一条平滑曲线，并从悬空、低增益、急停可用的条件开始测试。
@@ -113,6 +119,27 @@ calf=`-161 deg`。
   --command 0.3 0.0 0.0 \
   --duration 30 \
   --viewer
+```
+
+HimLoco 策略使用 `encoder.onnx` 和 `policy.onnx` 两个网络。Runner 会按
+`deploy.yaml` 的全局 `history_length` 维护当前帧优先的 45 维观测历史，先由 encoder
+生成 3 维速度估计和 16 维 latent，再把它们与当前观测拼成 64 维 policy 输入：
+
+```bash
+./scripts/run_sim2sim.sh \
+  --encoder /path/to/run/exported/encoder.onnx \
+  --policy /path/to/run/exported/policy.onnx \
+  --deploy-yaml /path/to/run/params/deploy.yaml \
+  --command 0.3 0.0 0.0 --duration 30 --viewer
+```
+
+当训练 run 已包含两个 ONNX 文件时，也可以直接执行
+`./scripts/teleop_mujoco_policy.sh /path/to/run`，脚本会自动传入 encoder。
+若只有训练 checkpoint，下面的命令会自动选择 run 中迭代数最大的 `model_*.pt`，导出
+双 ONNX 后立即打开键盘 MuJoCo：
+
+```bash
+./scripts/teleop_himloco_checkpoint.sh /path/to/run
 ```
 
 控制器严格使用 `deploy.yaml` 中的 observation 顺序、缩放、动作 offset/scale、

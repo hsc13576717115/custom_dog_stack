@@ -16,9 +16,9 @@
       </material>
     </visual>
     <collision>
-      <origin xyz="0 0 0" rpy="0 0 0" />
+      <origin xyz="0 0.005 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="package://custom_dog_description/meshes/base.STL" />
+        <box size="0.255 0.220 0.100" />
       </geometry>
     </collision>
   </link>
@@ -38,9 +38,9 @@
       </material>
     </visual>
     <collision>
-      <origin xyz="0 0 0" rpy="0 0 0" />
+      <origin xyz="-0.004 0 0" rpy="0 1.57079632679 0" />
       <geometry>
-        <mesh filename="package://custom_dog_description/meshes/FR_hip.STL" />
+        <cylinder radius="0.040" length="0.090" />
       </geometry>
     </collision>
   </link>
@@ -60,9 +60,9 @@
       </material>
     </visual>
     <collision>
-      <origin xyz="0 0 0" rpy="0 0 0" />
+      <origin xyz="0 0.023 -0.105" rpy="0 0 0" />
       <geometry>
-        <mesh filename="package://custom_dog_description/meshes/FR_thigh.STL" />
+        <cylinder radius="0.035" length="0.190" />
       </geometry>
     </collision>
   </link>
@@ -82,9 +82,9 @@
       </material>
     </visual>
     <collision>
-      <origin xyz="0 0 0" rpy="0 0 0" />
+      <origin xyz="0.005 0 -0.104" rpy="0 0 0" />
       <geometry>
-        <mesh filename="package://custom_dog_description/meshes/FR_calf.STL" />
+        <cylinder radius="0.018" length="0.185" />
       </geometry>
     </collision>
   </link>
@@ -106,7 +106,7 @@
     <collision>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="package://custom_dog_description/meshes/FR_foot.STL" />
+        <sphere radius="0.026" />
       </geometry>
     </collision>
   </link>
@@ -126,9 +126,9 @@
       </material>
     </visual>
     <collision>
-      <origin xyz="0 0 0" rpy="0 0 0" />
+      <origin xyz="-0.004 0 0" rpy="0 1.57079632679 0" />
       <geometry>
-        <mesh filename="package://custom_dog_description/meshes/FL_hip.STL" />
+        <cylinder radius="0.040" length="0.090" />
       </geometry>
     </collision>
   </link>
@@ -148,9 +148,9 @@
       </material>
     </visual>
     <collision>
-      <origin xyz="0 0 0" rpy="0 0 0" />
+      <origin xyz="0 -0.023 -0.105" rpy="0 0 0" />
       <geometry>
-        <mesh filename="package://custom_dog_description/meshes/FL_thigh.STL" />
+        <cylinder radius="0.035" length="0.190" />
       </geometry>
     </collision>
   </link>
@@ -170,9 +170,9 @@
       </material>
     </visual>
     <collision>
-      <origin xyz="0 0 0" rpy="0 0 0" />
+      <origin xyz="0.005 0 -0.104" rpy="0 0 0" />
       <geometry>
-        <mesh filename="package://custom_dog_description/meshes/FL_calf.STL" />
+        <cylinder radius="0.018" length="0.185" />
       </geometry>
     </collision>
   </link>
@@ -194,7 +194,7 @@
     <collision>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="package://custom_dog_description/meshes/FL_foot.STL" />
+        <sphere radius="0.026" />
       </geometry>
     </collision>
   </link>
@@ -214,9 +214,9 @@
       </material>
     </visual>
     <collision>
-      <origin xyz="0 0 0" rpy="0 0 0" />
+      <origin xyz="0.004 0 0" rpy="0 1.57079632679 0" />
       <geometry>
-        <mesh filename="package://custom_dog_description/meshes/RR_hip.STL" />
+        <cylinder radius="0.040" length="0.090" />
       </geometry>
     </collision>
   </link>
@@ -236,9 +236,9 @@
       </material>
     </visual>
     <collision>
-      <origin xyz="0 0 0" rpy="0 0 0" />
+      <origin xyz="0 0.023 -0.105" rpy="0 0 0" />
       <geometry>
-        <mesh filename="package://custom_dog_description/meshes/RR_thigh.STL" />
+        <cylinder radius="0.035" length="0.190" />
       </geometry>
     </collision>
   </link>
@@ -258,9 +258,9 @@
       </material>
     </visual>
     <collision>
-      <origin xyz="0 0 0" rpy="0 0 0" />
+      <origin xyz="0.005 0 -0.104" rpy="0 0 0" />
       <geometry>
-        <mesh filename="package://custom_dog_description/meshes/RR_calf.STL" />
+        <cylinder radius="0.018" length="0.185" />
       </geometry>
     </collision>
   </link>
@@ -282,7 +282,7 @@
     <collision>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="package://custom_dog_description/meshes/RR_foot.STL" />
+        <sphere radius="0.026" />
       </geometry>
     </collision>
   </link>
@@ -302,9 +302,9 @@
       </material>
     </visual>
     <collision>
-      <origin xyz="0 0 0" rpy="0 0 0" />
+      <origin xyz="0.004 0 0" rpy="0 1.57079632679 0" />
       <geometry>
-        <mesh filename="package://custom_dog_description/meshes/RL_hip.STL" />
+        <cylinder radius="0.040" length="0.090" />
       </geometry>
     </collision>
   </link>
@@ -324,9 +324,9 @@
       </material>
     </visual>
     <collision>
-      <origin xyz="0 0 0" rpy="0 0 0" />
+      <origin xyz="0 -0.023 -0.105" rpy="0 0 0" />
       <geometry>
-        <mesh filename="package://custom_dog_description/meshes/RL_thigh.STL" />
+        <cylinder radius="0.035" length="0.190" />
       </geometry>
     </collision>
   </link>
@@ -346,9 +346,9 @@
       </material>
     </visual>
     <collision>
-      <origin xyz="0 0 0" rpy="0 0 0" />
+      <origin xyz="0.005 0 -0.104" rpy="0 0 0" />
       <geometry>
-        <mesh filename="package://custom_dog_description/meshes/RL_calf.STL" />
+        <cylinder radius="0.018" length="0.185" />
       </geometry>
     </collision>
   </link>
@@ -370,7 +370,7 @@
     <collision>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="package://custom_dog_description/meshes/RL_foot.STL" />
+        <sphere radius="0.026" />
       </geometry>
     </collision>
   </link>

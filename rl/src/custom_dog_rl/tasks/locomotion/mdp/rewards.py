@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from typing import TYPE_CHECKING
 
 import torch
@@ -26,6 +27,7 @@ def _desired_trot_stance(
     max_frequency: float,
     full_speed: float,
     yaw_speed_scale: float,
+    yaw_command_threshold: float | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Build the FR/FL/RR/RL diagonal trot schedule shared by gait rewards."""
 
@@ -41,6 +43,7 @@ def _desired_trot_stance(
         max_frequency=max_frequency,
         full_speed=full_speed,
         yaw_speed_scale=yaw_speed_scale,
+        yaw_command_threshold=yaw_command_threshold,
     )
     offsets = phase.new_tensor((0.0, 0.5, 0.5, 0.0))
     foot_phase = torch.remainder(phase.unsqueeze(1) + offsets.unsqueeze(0), 1.0)
@@ -57,6 +60,7 @@ def trot_contact_schedule(
     max_frequency: float = 3.2,
     full_speed: float = 3.0,
     yaw_speed_scale: float = 0.35,
+    yaw_command_threshold: float | None = None,
 ) -> torch.Tensor:
     """Reward matching the desired diagonal trot contact state."""
 
@@ -70,6 +74,7 @@ def trot_contact_schedule(
         max_frequency,
         full_speed,
         yaw_speed_scale,
+        yaw_command_threshold,
     )
     is_contact = contact_sensor.data.current_contact_time[:, sensor_cfg.body_ids] > 0.0
     return torch.mean((desired_stance == is_contact).float(), dim=1) * moving
@@ -86,6 +91,7 @@ def trot_stance_swing_tracking(
     max_frequency: float = 3.2,
     full_speed: float = 3.0,
     yaw_speed_scale: float = 0.35,
+    yaw_command_threshold: float | None = None,
     stance_velocity_std: float = 0.35,
     swing_force_std: float = 25.0,
 ) -> torch.Tensor:
@@ -104,6 +110,7 @@ def trot_stance_swing_tracking(
         max_frequency,
         full_speed,
         yaw_speed_scale,
+        yaw_command_threshold,
     )
     foot_speed = torch.linalg.vector_norm(
         asset.data.body_lin_vel_w[:, asset_cfg.body_ids, :2], dim=2
@@ -120,20 +127,34 @@ def joint_deviation_l2(
     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
     stand_still_scale: float = 1.0,
     velocity_threshold: float = 0.3,
+    command_name: str = "base_velocity",
+    planar_command_threshold: float = 1e-6,
+    yaw_command_threshold: float = 1e-6,
 ) -> torch.Tensor:
-    """Penalize whole-body squared deviation, stronger during zero-command stand."""
+    """Penalize whole-body squared deviation, stronger during zero-command stand.
+
+    A commanded yaw is locomotion, even when the planar command is zero.  Both
+    command thresholds must therefore be satisfied before applying the standing
+    multiplier.
+    """
 
     if stand_still_scale < 1.0:
         raise ValueError("stand_still_scale must be at least 1")
     if velocity_threshold < 0.0:
         raise ValueError("velocity_threshold must be non-negative")
+    if planar_command_threshold < 0.0 or yaw_command_threshold < 0.0:
+        raise ValueError("command thresholds must be non-negative")
     asset = env.scene[asset_cfg.name]
     error = asset.data.joint_pos[:, asset_cfg.joint_ids] - asset.data.default_joint_pos[:, asset_cfg.joint_ids]
     deviation = torch.sum(torch.square(error), dim=1)
-    command = env.command_manager.get_command("base_velocity")
+    command = env.command_manager.get_command(command_name)
     command_speed = torch.linalg.vector_norm(command[:, :2], dim=1)
     body_speed = torch.linalg.vector_norm(asset.data.root_lin_vel_b[:, :2], dim=1)
-    standing = torch.logical_and(command_speed <= 1e-6, body_speed <= velocity_threshold)
+    command_standing = torch.logical_and(
+        command_speed <= planar_command_threshold,
+        torch.abs(command[:, 2]) <= yaw_command_threshold,
+    )
+    standing = torch.logical_and(command_standing, body_speed <= velocity_threshold)
     scale = torch.where(standing, torch.full_like(deviation, stand_still_scale), torch.ones_like(deviation))
     return scale * deviation
 
@@ -229,17 +250,99 @@ def hip_outward_speed_style_l2(
     return torch.mean(torch.square(excess), dim=1)
 
 
+def hip_outward_band_l2(
+    env: "ManagerBasedRLEnv",
+    standing_band: tuple[float, float],
+    walking_band: tuple[float, float],
+    high_speed_band: tuple[float, float],
+    walking_speed: float = 0.35,
+    high_speed: float = 2.0,
+    lateral_allowance: float = 0.10,
+    yaw_allowance: float = 0.03,
+    command_name: str = "base_velocity",
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """Keep hip ab/adduction inside a speed-adaptive band without fixing its angle."""
+
+    bands = (standing_band, walking_band, high_speed_band)
+    if not (0.0 < walking_speed < high_speed):
+        raise ValueError("walking_speed must be positive and less than high_speed")
+    if any(len(band) != 2 or band[0] >= band[1] for band in bands):
+        raise ValueError("each hip band must contain an increasing lower/upper pair")
+    if lateral_allowance < 0.0 or yaw_allowance < 0.0:
+        raise ValueError("hip command allowances must be non-negative")
+
+    asset = env.scene[asset_cfg.name]
+    command = env.command_manager.get_command(command_name)
+    speed = torch.linalg.vector_norm(command[:, :2], dim=1) + 0.25 * torch.abs(command[:, 2])
+    walk_blend = torch.clamp(speed / walking_speed, min=0.0, max=1.0)
+    fast_blend = torch.clamp(
+        (speed - walking_speed) / (high_speed - walking_speed), min=0.0, max=1.0
+    )
+
+    lower = standing_band[0] + walk_blend * (walking_band[0] - standing_band[0])
+    upper = standing_band[1] + walk_blend * (walking_band[1] - standing_band[1])
+    lower += fast_blend * (high_speed_band[0] - walking_band[0])
+    upper += fast_blend * (high_speed_band[1] - walking_band[1])
+    allowance = lateral_allowance * torch.abs(command[:, 1]) + yaw_allowance * torch.abs(
+        command[:, 2]
+    )
+    lower -= allowance
+    upper += allowance
+
+    outward_sign = torch.tensor((-1.0, 1.0, -1.0, 1.0), device=env.device)
+    outward = asset.data.joint_pos[:, _hip_joint_ids(env, asset_cfg)] * outward_sign
+    below = torch.clamp(lower.unsqueeze(1) - outward, min=0.0)
+    above = torch.clamp(outward - upper.unsqueeze(1), min=0.0)
+    return torch.mean(torch.square(below + above), dim=1)
+
+
+def paired_lateral_separation_l2(
+    env: "ManagerBasedRLEnv",
+    asset_cfg: SceneEntityCfg,
+    minimum_separation: float,
+    violation_scale: float = 0.05,
+    lateral_allowance: float = 0.0,
+    yaw_allowance: float = 0.0,
+    command_name: str = "base_velocity",
+) -> torch.Tensor:
+    """Penalize front/rear left-right body pairs that approach each other too closely."""
+
+    if minimum_separation <= 0.0 or violation_scale <= 0.0:
+        raise ValueError("separation and violation scale must be positive")
+    if lateral_allowance < 0.0 or yaw_allowance < 0.0:
+        raise ValueError("separation command allowances must be non-negative")
+    asset = env.scene[asset_cfg.name]
+    if len(asset_cfg.body_ids) != 4:
+        raise ValueError("paired lateral separation requires FR, FL, RR, RL bodies")
+    body_delta_w = asset.data.body_pos_w[:, asset_cfg.body_ids] - asset.data.root_pos_w.unsqueeze(1)
+    root_quat = asset.data.root_quat_w.unsqueeze(1).expand(-1, 4, -1).reshape(-1, 4)
+    body_pos_b = quat_apply_inverse(root_quat, body_delta_w.reshape(-1, 3)).reshape(-1, 4, 3)
+    front = torch.abs(body_pos_b[:, 1, 1] - body_pos_b[:, 0, 1])
+    rear = torch.abs(body_pos_b[:, 3, 1] - body_pos_b[:, 2, 1])
+    separation = torch.stack((front, rear), dim=1)
+    command = env.command_manager.get_command(command_name)
+    allowance = lateral_allowance * torch.abs(command[:, 1]) + yaw_allowance * torch.abs(
+        command[:, 2]
+    )
+    adaptive_minimum = torch.clamp(minimum_separation - allowance, min=0.5 * minimum_separation)
+    violation = torch.clamp(adaptive_minimum.unsqueeze(1) - separation, min=0.0)
+    return torch.mean(torch.square(violation / violation_scale), dim=1)
+
+
 def foot_clearance_speed_style(
     env: "ManagerBasedRLEnv",
     sensor_cfg: SceneEntityCfg,
     asset_cfg: SceneEntityCfg,
     target_height: float = 0.065,
+    target_height_high: float | None = None,
+    full_speed: float = 3.0,
     std: float = 0.045,
     command_name: str = "base_velocity",
     command_threshold: float = 0.15,
     yaw_speed_scale: float = 0.0,
 ) -> torch.Tensor:
-    """Reward moving feet that pass through a modest clearance band.
+    """Reward moving feet that pass through a command-adaptive clearance band.
 
     Contact gates the term to the swing phase.  The height is measured from
     the flat-ground world frame and is deliberately a soft band, not a body
@@ -248,6 +351,10 @@ def foot_clearance_speed_style(
 
     if target_height <= 0.0 or std <= 0.0 or yaw_speed_scale < 0.0:
         raise ValueError("target_height and std must be positive")
+    if target_height_high is not None and (
+        target_height_high <= 0.0 or full_speed <= 0.0
+    ):
+        raise ValueError("target_height_high and full_speed must be positive")
     asset = env.scene[asset_cfg.name]
     contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
     in_contact = contact_sensor.data.current_contact_time[:, sensor_cfg.body_ids] > 0.0
@@ -257,7 +364,12 @@ def foot_clearance_speed_style(
     swing = (~in_contact) & moving.unsqueeze(1)
     foot_z = asset.data.body_pos_w[:, asset_cfg.body_ids, 2]
     foot_speed = torch.linalg.vector_norm(asset.data.body_lin_vel_w[:, asset_cfg.body_ids, :2], dim=2)
-    height_error = torch.square(foot_z - target_height)
+    if target_height_high is None:
+        desired_height = torch.full_like(motion, target_height)
+    else:
+        blend = torch.clamp(motion / full_speed, min=0.0, max=1.0)
+        desired_height = target_height + blend * (target_height_high - target_height)
+    height_error = torch.square(foot_z - desired_height.unsqueeze(1))
     motion_gate = torch.tanh(4.0 * foot_speed)
     per_foot = torch.exp(-height_error / (std * std)) * motion_gate * swing
     return torch.mean(per_foot, dim=1)
@@ -417,6 +529,38 @@ def pure_axis_swing_count(
     return normalized * pure_axis
 
 
+def motion_swing_count(
+    env: "ManagerBasedRLEnv",
+    sensor_cfg: SceneEntityCfg,
+    command_name: str = "base_velocity",
+    planar_deadband: float = 0.03,
+    yaw_deadband: float = 0.05,
+    target_airborne: float = 2.0,
+    airborne_std: float = 0.75,
+) -> torch.Tensor:
+    """Reward a swing phase for every deliberate planar or yaw command."""
+
+    if planar_deadband < 0.0 or yaw_deadband < 0.0:
+        raise ValueError("motion deadbands must be non-negative")
+    if not (0.0 < target_airborne < 4.0 and airborne_std > 0.0):
+        raise ValueError("invalid swing-count target")
+    contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
+    in_contact = contact_sensor.data.current_contact_time[:, sensor_cfg.body_ids] > 0.0
+    airborne_count = torch.sum((~in_contact).to(torch.float), dim=1)
+    command = env.command_manager.get_command(command_name)
+    moving = (torch.linalg.vector_norm(command[:, :2], dim=1) > planar_deadband) | (
+        torch.abs(command[:, 2]) > yaw_deadband
+    )
+    score = torch.exp(-torch.square((airborne_count - target_airborne) / airborne_std))
+    planted_score = torch.exp(
+        torch.as_tensor(
+            -((target_airborne / airborne_std) ** 2), dtype=score.dtype, device=score.device
+        )
+    )
+    normalized = torch.clamp((score - planted_score) / (1.0 - planted_score), min=0.0)
+    return normalized * moving
+
+
 def pure_axis_swing_direction(
     env: "ManagerBasedRLEnv",
     sensor_cfg: SceneEntityCfg,
@@ -531,6 +675,8 @@ def stance_foot_placement_l2(
     command_name: str = "base_velocity",
     command_threshold: float = 0.12,
     max_error: float = 0.18,
+    lateral_gain: float = 1.0,
+    yaw_gain: float = 1.0,
 ) -> torch.Tensor:
     """Keep stance feet near a geometry-based Raibert landing point.
 
@@ -544,6 +690,8 @@ def stance_foot_placement_l2(
         raise ValueError("nominal_positions must contain four xyz triplets")
     if stance_time <= 0.0 or position_std <= 0.0 or max_error <= 0.0:
         raise ValueError("stance_time, position_std and max_error must be positive")
+    if lateral_gain < 0.0 or yaw_gain < 0.0:
+        raise ValueError("lateral_gain and yaw_gain must be non-negative")
     asset = env.scene[asset_cfg.name]
     contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
     contact = contact_sensor.data.current_contact_time[:, sensor_cfg.body_ids] > 0.0
@@ -557,10 +705,10 @@ def stance_foot_placement_l2(
     target = nominal.expand(foot_pos_b.shape[0], -1, -1).clone()
     half_stance = 0.5 * stance_time
     target[:, :, 0] += half_stance * command[:, 0:1]
-    target[:, :, 1] += half_stance * command[:, 1:2]
+    target[:, :, 1] += lateral_gain * half_stance * command[:, 1:2]
     # Planar omega x r = (-wz * y, wz * x).
-    target[:, :, 0] -= half_stance * command[:, 2:3] * nominal[:, :, 1]
-    target[:, :, 1] += half_stance * command[:, 2:3] * nominal[:, :, 0]
+    target[:, :, 0] -= yaw_gain * half_stance * command[:, 2:3] * nominal[:, :, 1]
+    target[:, :, 1] += yaw_gain * half_stance * command[:, 2:3] * nominal[:, :, 0]
     error = foot_pos_b[:, :, :2] - target[:, :, :2]
     error_norm = torch.linalg.vector_norm(error, dim=2)
     error_norm = torch.clamp(error_norm, max=max_error)
@@ -747,6 +895,49 @@ def recovery_upright_height(
     return reward
 
 
+def recovery_orientation_progress(
+    env: "ManagerBasedRLEnv",
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """Provide a smooth upright signal from supine, side, or belly states."""
+
+    asset = env.scene[asset_cfg.name]
+    return torch.clamp(0.5 * (1.0 - asset.data.projected_gravity_b[:, 2]), 0.0, 1.0)
+
+
+def recovery_stable_support(
+    env: "ManagerBasedRLEnv",
+    prone_height: float,
+    standing_height: float,
+    angular_velocity_std: float,
+    contact_force_threshold: float,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+    sensor_cfg: SceneEntityCfg = SceneEntityCfg("contact_forces", body_names=".*_foot"),
+) -> torch.Tensor:
+    """Reward high, upright, low-rate support without requiring exact joint poses."""
+
+    if standing_height <= prone_height:
+        raise ValueError("standing_height must exceed prone_height")
+    if angular_velocity_std <= 0.0 or contact_force_threshold <= 0.0:
+        raise ValueError("support thresholds must be positive")
+    asset = env.scene[asset_cfg.name]
+    sensor = env.scene.sensors[sensor_cfg.name]
+    height = torch.clamp(
+        (asset.data.root_pos_w[:, 2] - prone_height) / (standing_height - prone_height),
+        0.0,
+        1.0,
+    )
+    upright = torch.clamp(0.5 * (1.0 - asset.data.projected_gravity_b[:, 2]), 0.0, 1.0)
+    foot_forces = torch.linalg.vector_norm(
+        sensor.data.net_forces_w[:, sensor_cfg.body_ids],
+        dim=-1,
+    )
+    support = torch.mean((foot_forces >= contact_force_threshold).float(), dim=1)
+    angular_speed_sq = torch.sum(torch.square(asset.data.root_ang_vel_b), dim=1)
+    angular_stability = torch.exp(-angular_speed_sq / (angular_velocity_std**2))
+    return height * upright * support * angular_stability
+
+
 def track_ang_vel_z_l2(
     env: "ManagerBasedRLEnv",
     command_name: str,
@@ -764,6 +955,37 @@ def track_ang_vel_z_l2(
     command = env.command_manager.get_command(command_name)[:, 2]
     error = command - asset.data.root_ang_vel_b[:, 2]
     return torch.square(error)
+
+
+def yaw_overspeed_relative_l2(
+    env: "ManagerBasedRLEnv",
+    command_name: str = "base_velocity",
+    command_min: float = 0.05,
+    planar_command_threshold: float = 0.03,
+    max_ratio: float = 1.0,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """Penalize pure-yaw overshoot without discouraging recovery from undershoot.
+
+    Symmetric tracking losses can be dominated by the other gait rewards near
+    a command-range boundary.  This term activates only for pure-yaw commands
+    and only when the measured rate exceeds the request in its signed
+    direction.  The error is normalized so low and high yaw commands remain
+    visible at comparable scales.
+    """
+
+    if command_min <= 0.0 or planar_command_threshold < 0.0 or max_ratio <= 0.0:
+        raise ValueError("invalid yaw overspeed parameters")
+    asset = env.scene[asset_cfg.name]
+    command = env.command_manager.get_command(command_name)
+    yaw_command = command[:, 2]
+    active = (torch.abs(yaw_command) >= command_min) & (
+        torch.linalg.vector_norm(command[:, :2], dim=1) <= planar_command_threshold
+    )
+    signed_measured = torch.sign(yaw_command) * asset.data.root_ang_vel_b[:, 2]
+    overspeed = torch.clamp(signed_measured - torch.abs(yaw_command), min=0.0)
+    ratio = overspeed / torch.clamp(torch.abs(yaw_command), min=command_min)
+    return torch.square(torch.clamp(ratio, max=max_ratio)) * active
 
 
 def track_lin_vel_xy_l2(
@@ -886,6 +1108,175 @@ def inactive_velocity_axes_l2(
     weights = torch.tensor(axis_weights, dtype=command.dtype, device=env.device)
     inactive = torch.abs(command) < minimum
     return torch.sum(torch.square(measured) * inactive * weights, dim=1)
+
+
+def pure_axis_velocity_decoupling_l2(
+    env: "ManagerBasedRLEnv",
+    command_name: str = "base_velocity",
+    command_min: tuple[float, float, float] = (0.03, 0.03, 0.05),
+    axis_weights: tuple[float, float, float] = (1.0, 1.0, 1.0),
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """Penalize inactive-axis motion only for pure vx, vy, or yaw commands.
+
+    The generic inactive-axis term is useful for all command modes, but its
+    gradient can be diluted by combined commands.  This separate term keeps
+    the three single-axis contracts visible without constraining legitimate
+    coupling while turning or side-stepping.
+    """
+
+    if len(command_min) != 3 or any(value <= 0.0 for value in command_min):
+        raise ValueError("command_min must contain three positive values")
+    if len(axis_weights) != 3 or any(value <= 0.0 for value in axis_weights):
+        raise ValueError("axis_weights must contain three positive values")
+    asset = env.scene[asset_cfg.name]
+    command = env.command_manager.get_command(command_name)
+    measured = torch.stack(
+        (
+            asset.data.root_lin_vel_b[:, 0],
+            asset.data.root_lin_vel_b[:, 1],
+            asset.data.root_ang_vel_b[:, 2],
+        ),
+        dim=1,
+    )
+    minimum = torch.tensor(command_min, dtype=command.dtype, device=env.device)
+    weights = torch.tensor(axis_weights, dtype=command.dtype, device=env.device)
+    active = torch.abs(command) >= minimum
+    pure_axis = torch.sum(active, dim=1) == 1
+    return torch.sum(torch.square(measured) * (~active) * weights, dim=1) * pure_axis
+
+
+def standing_foot_placement_l2(
+    env: "ManagerBasedRLEnv",
+    asset_cfg: SceneEntityCfg,
+    nominal_positions: tuple[float, ...],
+    command_name: str = "base_velocity",
+    planar_command_threshold: float = 0.03,
+    yaw_command_threshold: float = 0.05,
+    velocity_threshold: float = 0.20,
+    position_std: float = 0.045,
+    max_error: float = 0.12,
+) -> torch.Tensor:
+    """Keep all four feet at the calibrated home footprint during a stand.
+
+    This term is intentionally gated off for locomotion so lateral and yaw
+    commands can widen the stance naturally.
+    """
+
+    if len(nominal_positions) != 12:
+        raise ValueError("nominal_positions must contain four xyz triplets")
+    if planar_command_threshold < 0.0 or yaw_command_threshold < 0.0:
+        raise ValueError("command thresholds must be non-negative")
+    if velocity_threshold < 0.0 or position_std <= 0.0 or max_error <= 0.0:
+        raise ValueError("invalid standing-foot placement parameters")
+    asset = env.scene[asset_cfg.name]
+    foot_pos_w = asset.data.body_pos_w[:, asset_cfg.body_ids] - asset.data.root_pos_w.unsqueeze(1)
+    num_feet = foot_pos_w.shape[1]
+    root_quat = asset.data.root_quat_w.unsqueeze(1).expand(-1, num_feet, -1).reshape(-1, 4)
+    foot_pos_b = quat_apply_inverse(root_quat, foot_pos_w.reshape(-1, 3)).reshape(-1, num_feet, 3)
+    nominal = torch.tensor(
+        nominal_positions, dtype=foot_pos_b.dtype, device=env.device
+    ).view(1, num_feet, 3)
+    error = torch.linalg.vector_norm(foot_pos_b[:, :, :2] - nominal[:, :, :2], dim=2)
+    error = torch.clamp(error, max=max_error)
+    command = env.command_manager.get_command(command_name)
+    standing_command = (
+        torch.linalg.vector_norm(command[:, :2], dim=1) <= planar_command_threshold
+    ) & (torch.abs(command[:, 2]) <= yaw_command_threshold)
+    body_speed = torch.linalg.vector_norm(asset.data.root_lin_vel_b[:, :2], dim=1)
+    standing = standing_command & (body_speed <= velocity_threshold)
+    return torch.mean(torch.square(error / position_std), dim=1) * standing
+
+
+def standing_base_height_band_l2(
+    env: "ManagerBasedRLEnv",
+    command_name: str = "base_velocity",
+    lower_height: float = 0.31,
+    upper_height: float = 0.33,
+    planar_command_threshold: float = 0.03,
+    yaw_command_threshold: float = 0.05,
+    velocity_threshold: float = 0.20,
+    error_std: float = 0.02,
+    max_error: float = 0.08,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """Penalize body height outside a deployable band only while standing."""
+
+    if lower_height <= 0.0 or upper_height <= lower_height:
+        raise ValueError("standing height band must be positive and increasing")
+    if planar_command_threshold < 0.0 or yaw_command_threshold < 0.0:
+        raise ValueError("command thresholds must be non-negative")
+    if velocity_threshold < 0.0 or error_std <= 0.0 or max_error <= 0.0:
+        raise ValueError("invalid standing-height parameters")
+    asset = env.scene[asset_cfg.name]
+    command = env.command_manager.get_command(command_name)
+    standing_command = (
+        torch.linalg.vector_norm(command[:, :2], dim=1) <= planar_command_threshold
+    ) & (torch.abs(command[:, 2]) <= yaw_command_threshold)
+    body_speed = torch.linalg.vector_norm(asset.data.root_lin_vel_b[:, :2], dim=1)
+    height = asset.data.root_pos_w[:, 2]
+    below = torch.clamp(lower_height - height, min=0.0)
+    above = torch.clamp(height - upper_height, min=0.0)
+    error = torch.clamp(below + above, max=max_error)
+    standing = standing_command & (body_speed <= velocity_threshold)
+    return torch.square(error / error_std) * standing
+
+
+def standing_joint_deviation_normalized_l2(
+    env: "ManagerBasedRLEnv",
+    asset_cfg: SceneEntityCfg,
+    command_name: str = "base_velocity",
+    planar_command_threshold: float = 0.03,
+    yaw_command_threshold: float = 0.05,
+    velocity_threshold: float = 0.20,
+    position_std: float = 0.10,
+    max_error: float = 0.30,
+) -> torch.Tensor:
+    """Keep the calibrated symmetric joint pose only during zero-command stands."""
+
+    if planar_command_threshold < 0.0 or yaw_command_threshold < 0.0:
+        raise ValueError("command thresholds must be non-negative")
+    if velocity_threshold < 0.0 or position_std <= 0.0 or max_error <= 0.0:
+        raise ValueError("invalid standing-joint parameters")
+    asset = env.scene[asset_cfg.name]
+    error = asset.data.joint_pos[:, asset_cfg.joint_ids] - asset.data.default_joint_pos[
+        :, asset_cfg.joint_ids
+    ]
+    error = torch.clamp(torch.abs(error), max=max_error)
+    command = env.command_manager.get_command(command_name)
+    standing_command = (
+        torch.linalg.vector_norm(command[:, :2], dim=1) <= planar_command_threshold
+    ) & (torch.abs(command[:, 2]) <= yaw_command_threshold)
+    body_speed = torch.linalg.vector_norm(asset.data.root_lin_vel_b[:, :2], dim=1)
+    standing = standing_command & (body_speed <= velocity_threshold)
+    return torch.mean(torch.square(error / position_std), dim=1) * standing
+
+
+def standing_orientation_normalized_l2(
+    env: "ManagerBasedRLEnv",
+    command_name: str = "base_velocity",
+    planar_command_threshold: float = 0.03,
+    yaw_command_threshold: float = 0.05,
+    velocity_threshold: float = 0.20,
+    tilt_std_deg: float = 3.0,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """Strongly level the trunk only during a settled zero-command stand."""
+
+    if planar_command_threshold < 0.0 or yaw_command_threshold < 0.0:
+        raise ValueError("command thresholds must be non-negative")
+    if velocity_threshold < 0.0 or tilt_std_deg <= 0.0 or tilt_std_deg >= 90.0:
+        raise ValueError("invalid standing-orientation parameters")
+    asset = env.scene[asset_cfg.name]
+    command = env.command_manager.get_command(command_name)
+    standing_command = (
+        torch.linalg.vector_norm(command[:, :2], dim=1) <= planar_command_threshold
+    ) & (torch.abs(command[:, 2]) <= yaw_command_threshold)
+    body_speed = torch.linalg.vector_norm(asset.data.root_lin_vel_b[:, :2], dim=1)
+    standing = standing_command & (body_speed <= velocity_threshold)
+    scale = math.sin(math.radians(tilt_std_deg))
+    tilt_error = torch.sum(torch.square(asset.data.projected_gravity_b[:, :2]), dim=1)
+    return tilt_error / (scale * scale) * standing
 
 
 def high_speed_turn_lateral_drift_l2(

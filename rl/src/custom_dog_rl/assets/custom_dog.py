@@ -10,6 +10,8 @@ from isaaclab.utils import configclass
 from unitree_rl_lab.assets.robots import unitree_actuators
 from unitree_rl_lab.assets.robots.unitree import UnitreeArticulationCfg, UnitreeUrdfFileCfg
 
+from .collision_contract import filtered_body_pairs
+
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[4]
 CUSTOM_DOG_DESCRIPTION_DIR = Path(
@@ -99,6 +101,66 @@ CUSTOM_DOG_CFG = UnitreeArticulationCfg(
         "RL_calf_joint",
     ],
 )
+
+
+@sim_utils.clone
+def _spawn_custom_dog_with_selective_self_collisions(
+    prim_path: str,
+    cfg: UnitreeUrdfFileCfg,
+    translation: tuple[float, float, float] | None = None,
+    orientation: tuple[float, float, float, float] | None = None,
+    **kwargs,
+):
+    """Spawn one source robot and author same-leg collision filters before cloning."""
+
+    from pxr import Sdf, UsdPhysics
+
+    prim = sim_utils.spawn_from_urdf.__wrapped__(
+        prim_path,
+        cfg,
+        translation=translation,
+        orientation=orientation,
+        **kwargs,
+    )
+    stage = prim.GetStage()
+    missing_bodies = []
+    for body_a, body_b in filtered_body_pairs():
+        prim_a = stage.GetPrimAtPath(f"{prim_path}/{body_a}")
+        prim_b = stage.GetPrimAtPath(f"{prim_path}/{body_b}")
+        if not prim_a.IsValid():
+            missing_bodies.append(body_a)
+            continue
+        if not prim_b.IsValid():
+            missing_bodies.append(body_b)
+            continue
+        # PhysX's own addPairFilter helper authors the relationship on both
+        # endpoints.  A single directed USD target is visible to inspection
+        # but does not reliably suppress articulation-link contact.
+        for source, target in ((prim_a, prim_b), (prim_b, prim_a)):
+            filter_api = UsdPhysics.FilteredPairsAPI.Apply(source)
+            filter_api.CreateFilteredPairsRel().AddTarget(Sdf.Path(target.GetPath()))
+    if missing_bodies:
+        names = ", ".join(sorted(set(missing_bodies)))
+        raise ValueError(f"Selective collision asset is missing rigid bodies: {names}")
+    return prim
+
+
+# Opt-in variant: the default asset remains unchanged for historical checkpoints.
+# PhysX receives all self contacts, then filters the base-to-leg and same-leg
+# pairs so only contact between different legs remains.
+CUSTOM_DOG_SELECTIVE_SELF_COLLISION_CFG = CUSTOM_DOG_CFG.copy()
+CUSTOM_DOG_SELECTIVE_SELF_COLLISION_CFG.spawn = CUSTOM_DOG_CFG.spawn.copy()
+CUSTOM_DOG_SELECTIVE_SELF_COLLISION_CFG.spawn.asset_path = str(
+    CUSTOM_DOG_DESCRIPTION_DIR / "urdf" / "custom_dog_selective_collision.urdf"
+)
+CUSTOM_DOG_SELECTIVE_SELF_COLLISION_CFG.spawn.func = (
+    _spawn_custom_dog_with_selective_self_collisions
+)
+CUSTOM_DOG_SELECTIVE_SELF_COLLISION_CFG.spawn.self_collision = True
+CUSTOM_DOG_SELECTIVE_SELF_COLLISION_CFG.spawn.articulation_props = (
+    CUSTOM_DOG_CFG.spawn.articulation_props.copy()
+)
+CUSTOM_DOG_SELECTIVE_SELF_COLLISION_CFG.spawn.articulation_props.enabled_self_collisions = True
 
 
 # Keep historical checkpoints on their original +/-0.1 rad hip offsets.  The

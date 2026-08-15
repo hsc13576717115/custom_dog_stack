@@ -31,9 +31,27 @@ case "${camera_mode}" in
         ;;
 esac
 
+routed_args=()
+encoder_args=()
+if [[ -f "${candidate}/exported/encoder.onnx" ]]; then
+    encoder_args=(--encoder "${candidate}/exported/encoder.onnx")
+fi
+if [[ -f "${candidate}/exported/stand_policy.onnx" || -f "${candidate}/params/stand_deploy.yaml" ]]; then
+    if [[ ! -f "${candidate}/exported/stand_policy.onnx" || ! -f "${candidate}/params/stand_deploy.yaml" ]]; then
+        echo "Routed candidate must contain both stand_policy.onnx and stand_deploy.yaml" >&2
+        exit 2
+    fi
+    routed_args=(
+        --stand-policy "${candidate}/exported/stand_policy.onnx"
+        --stand-deploy-yaml "${candidate}/params/stand_deploy.yaml"
+    )
+fi
+
 exec "${project_root}/scripts/run_sim2sim.sh" \
     --policy "${candidate}/exported/policy.onnx" \
+    "${encoder_args[@]}" \
     --deploy-yaml "${candidate}/params/deploy.yaml" \
+    "${routed_args[@]}" \
     --command 0.0 0.0 0.0 \
     --initial-state "${initial_state}" \
     --recovery-ramp "${recovery_ramp}" \

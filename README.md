@@ -712,9 +712,9 @@ CUSTOM_DOG_INITIAL_STATE=prone ./scripts/teleop_mujoco_policy.sh
 ```
 
 窗口获得焦点后，`1`/`P`/空格为 Passive，`2`/`R` 为 FixStand，`3`/`V` 为 Velocity；
-`W`/`S` 改前进速度，`A`/`D` 改侧向速度，`Q`/`E` 改偏航速度，`X` 清零。当前默认候选
-训练了 `vx/vy/yaw` 三轴命令。FixStand 使用默认 2 秒五次曲线；切换 Velocity 后先保持
-默认 1 秒零速度，再释放键盘命令。该入口只控制 MuJoCo，不会发送实机命令。
+`W`/`S` 改前进速度，`A`/`D` 改侧向速度，`Q`/`E` 改偏航速度，`X` 清零并平滑进入
+FixStand。当前默认候选训练了 `vx/vy/yaw` 三轴命令。FixStand 使用默认 2 秒五次曲线；
+进入 PolicyHold 后可直接按速度键恢复运动。该入口只控制 MuJoCo，不会发送实机命令。
 
 当前 10 秒位置保持测试数值稳定，但机体会有轻微滑移；在把 sim2sim 结果作为
 sim2real 依据前，还要继续优化足端简化碰撞体、摩擦以及 CAD 导出的关节偏轴。

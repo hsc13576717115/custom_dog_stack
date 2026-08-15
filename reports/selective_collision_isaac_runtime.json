@@ -1,0 +1,202 @@
+{
+  "accepted": true,
+  "asset_path": "/home/hsc/Dog_RL/custom_dog_stack/ros2/src/custom_dog_description/urdf/custom_dog_selective_collision.urdf",
+  "asset_sha256": "71d54ef145a36f3459740395788d491d2d3be0c6deb867ec1af9b38f9bc522b5",
+  "expected_filtered_pair_count": 40,
+  "failures": [],
+  "filtered_pair_count": 40,
+  "force_threshold_n": 1.0,
+  "forced_cross_leg_contact_steps": 50,
+  "forced_cross_leg_max_force_n": 103.22577667236328,
+  "forced_cross_leg_steps": 50,
+  "nominal_evaluation_steps": 200,
+  "nominal_nonfoot_by_body": {
+    "FL_calf": {
+      "contact_steps": 0,
+      "max_force_n": 0.0,
+      "mean_net_force_w_n": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "peak_net_force_w_n": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    "FL_hip": {
+      "contact_steps": 0,
+      "max_force_n": 0.0,
+      "mean_net_force_w_n": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "peak_net_force_w_n": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    "FL_thigh": {
+      "contact_steps": 0,
+      "max_force_n": 0.0,
+      "mean_net_force_w_n": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "peak_net_force_w_n": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    "FR_calf": {
+      "contact_steps": 0,
+      "max_force_n": 0.0,
+      "mean_net_force_w_n": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "peak_net_force_w_n": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    "FR_hip": {
+      "contact_steps": 0,
+      "max_force_n": 0.0,
+      "mean_net_force_w_n": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "peak_net_force_w_n": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    "FR_thigh": {
+      "contact_steps": 0,
+      "max_force_n": 0.0,
+      "mean_net_force_w_n": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "peak_net_force_w_n": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    "RL_calf": {
+      "contact_steps": 0,
+      "max_force_n": 0.0,
+      "mean_net_force_w_n": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "peak_net_force_w_n": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    "RL_hip": {
+      "contact_steps": 0,
+      "max_force_n": 0.0,
+      "mean_net_force_w_n": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "peak_net_force_w_n": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    "RL_thigh": {
+      "contact_steps": 0,
+      "max_force_n": 0.0,
+      "mean_net_force_w_n": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "peak_net_force_w_n": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    "RR_calf": {
+      "contact_steps": 0,
+      "max_force_n": 0.0,
+      "mean_net_force_w_n": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "peak_net_force_w_n": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    "RR_hip": {
+      "contact_steps": 0,
+      "max_force_n": 0.0,
+      "mean_net_force_w_n": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "peak_net_force_w_n": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    "RR_thigh": {
+      "contact_steps": 0,
+      "max_force_n": 0.0,
+      "mean_net_force_w_n": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "peak_net_force_w_n": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    "base": {
+      "contact_steps": 0,
+      "max_force_n": 0.0,
+      "mean_net_force_w_n": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "peak_net_force_w_n": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    }
+  },
+  "nominal_nonfoot_contact_steps": 0,
+  "nominal_nonfoot_max_force_n": 0.0,
+  "nominal_pose_held": true,
+  "nominal_root_height_m": 0.3240000009536743,
+  "task": "CustomDog-Velocity-OmniTrot-ClosedLoopSelectiveCollision-v1"
+}

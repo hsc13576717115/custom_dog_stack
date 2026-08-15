@@ -740,6 +740,12 @@ class StratifiedOmniVelocityCommand(RecoveryVelocityCommand):
             raise ValueError("bucket_probabilities must sum to one")
         if cfg.minimum_command_magnitude < 0.0:
             raise ValueError("minimum_command_magnitude must be non-negative")
+        if (cfg.flat_terrain_type_count is None) != (cfg.rough_terrain_ranges is None):
+            raise ValueError(
+                "flat_terrain_type_count and rough_terrain_ranges must be configured together"
+            )
+        if cfg.flat_terrain_type_count is not None and cfg.flat_terrain_type_count <= 0:
+            raise ValueError("flat_terrain_type_count must be positive")
         if not 0.0 <= cfg.rel_low_speed_x <= 1.0:
             raise ValueError("rel_low_speed_x must be in [0, 1]")
         if cfg.rel_low_speed_x > 0.0:
@@ -749,6 +755,35 @@ class StratifiedOmniVelocityCommand(RecoveryVelocityCommand):
             maximum = max(abs(cfg.ranges.lin_vel_x[0]), abs(cfg.ranges.lin_vel_x[1]))
             if high > maximum:
                 raise ValueError("low_speed_x_range must fit inside ranges.lin_vel_x")
+        if not 0.0 <= cfg.rel_low_speed_yaw <= 1.0:
+            raise ValueError("rel_low_speed_yaw must be in [0, 1]")
+        if cfg.rel_low_speed_yaw > 0.0:
+            low, high = cfg.low_speed_yaw_range
+            if not 0.0 < low <= high:
+                raise ValueError("low_speed_yaw_range must contain positive increasing magnitudes")
+            maximum = max(abs(cfg.ranges.ang_vel_z[0]), abs(cfg.ranges.ang_vel_z[1]))
+            if high > maximum:
+                raise ValueError("low_speed_yaw_range must fit inside ranges.ang_vel_z")
+        if not 0.0 <= cfg.rel_high_speed_yaw <= 1.0:
+            raise ValueError("rel_high_speed_yaw must be in [0, 1]")
+        if cfg.rel_low_speed_yaw + cfg.rel_high_speed_yaw > 1.0:
+            raise ValueError("low/high yaw mixture probabilities must sum to at most one")
+        if cfg.rel_high_speed_yaw > 0.0:
+            low, high = cfg.high_speed_yaw_range
+            if not 0.0 < low <= high:
+                raise ValueError("high_speed_yaw_range must contain positive increasing magnitudes")
+            maximum = max(abs(cfg.ranges.ang_vel_z[0]), abs(cfg.ranges.ang_vel_z[1]))
+            if high > maximum:
+                raise ValueError("high_speed_yaw_range must fit inside ranges.ang_vel_z")
+        if not 0.0 <= cfg.rel_low_speed_y <= 1.0:
+            raise ValueError("rel_low_speed_y must be in [0, 1]")
+        if cfg.rel_low_speed_y > 0.0:
+            low, high = cfg.low_speed_y_range
+            if not 0.0 < low <= high:
+                raise ValueError("low_speed_y_range must contain positive increasing magnitudes")
+            maximum = max(abs(cfg.ranges.lin_vel_y[0]), abs(cfg.ranges.lin_vel_y[1]))
+            if high > maximum:
+                raise ValueError("low_speed_y_range must fit inside ranges.lin_vel_y")
         super().__init__(cfg, env)
         for axis in ("vx", "vy", "wz"):
             for direction in ("negative", "positive"):
@@ -871,6 +906,40 @@ class StratifiedOmniVelocityCommand(RecoveryVelocityCommand):
             ).uniform_(low, high)
             sign = torch.where(x[use_low_speed_x] < 0.0, -1.0, 1.0)
             x[use_low_speed_x] = sign * magnitude
+        yaw_bearing = yaw_only | combined
+        yaw_mixture_draw = torch.rand(len(active_ids), device=self.device)
+        use_low_speed_yaw = yaw_bearing & (yaw_mixture_draw < self.cfg.rel_low_speed_yaw)
+        use_high_speed_yaw = yaw_bearing & (
+            yaw_mixture_draw >= self.cfg.rel_low_speed_yaw
+        ) & (
+            yaw_mixture_draw
+            < self.cfg.rel_low_speed_yaw + self.cfg.rel_high_speed_yaw
+        )
+        if torch.any(use_low_speed_yaw):
+            low, high = self.cfg.low_speed_yaw_range
+            magnitude = torch.empty(
+                int(torch.sum(use_low_speed_yaw).item()), device=self.device
+            ).uniform_(low, high)
+            sign = torch.where(yaw[use_low_speed_yaw] < 0.0, -1.0, 1.0)
+            yaw[use_low_speed_yaw] = sign * magnitude
+        if torch.any(use_high_speed_yaw):
+            low, high = self.cfg.high_speed_yaw_range
+            magnitude = torch.empty(
+                int(torch.sum(use_high_speed_yaw).item()), device=self.device
+            ).uniform_(low, high)
+            sign = torch.where(yaw[use_high_speed_yaw] < 0.0, -1.0, 1.0)
+            yaw[use_high_speed_yaw] = sign * magnitude
+        y_bearing = lateral | combined
+        use_low_speed_y = y_bearing & (
+            torch.rand(len(active_ids), device=self.device) < self.cfg.rel_low_speed_y
+        )
+        if torch.any(use_low_speed_y):
+            low, high = self.cfg.low_speed_y_range
+            magnitude = torch.empty(
+                int(torch.sum(use_low_speed_y).item()), device=self.device
+            ).uniform_(low, high)
+            sign = torch.where(y[use_low_speed_y] < 0.0, -1.0, 1.0)
+            y[use_low_speed_y] = sign * magnitude
         self.vel_command_b[active_ids[forward], 0] = x[forward]
         self.vel_command_b[active_ids[lateral], 1] = y[lateral]
         self.vel_command_b[active_ids[yaw_only], 2] = yaw[yaw_only]
@@ -879,6 +948,27 @@ class StratifiedOmniVelocityCommand(RecoveryVelocityCommand):
             self.vel_command_b[active_ids[combined], 1] = y[combined]
         self.vel_command_b[active_ids[combined], 2] = yaw[combined]
         self._sampled_vel_command_b[env_ids_tensor] = self.vel_command_b[env_ids_tensor]
+        self._apply_terrain_command_ranges(env_ids_tensor)
+
+    def _apply_terrain_command_ranges(self, env_ids: torch.Tensor) -> None:
+        """Keep the full command envelope on flat columns and clamp rough terrain."""
+
+        if self.cfg.flat_terrain_type_count is None:
+            return
+        terrain = self._env.scene.terrain
+        if not hasattr(terrain, "terrain_types"):
+            raise RuntimeError("terrain-aware commands require generated terrain types")
+        rough = terrain.terrain_types[env_ids] >= self.cfg.flat_terrain_type_count
+        rough_ids = env_ids[rough]
+        if len(rough_ids) == 0:
+            return
+        ranges = self.cfg.rough_terrain_ranges
+        assert ranges is not None
+        for axis, limits in enumerate(
+            (ranges.lin_vel_x, ranges.lin_vel_y, ranges.ang_vel_z)
+        ):
+            self.vel_command_b[rough_ids, axis].clamp_(float(limits[0]), float(limits[1]))
+        self._sampled_vel_command_b[rough_ids] = self.vel_command_b[rough_ids]
 
 
 @configclass
@@ -899,6 +989,24 @@ class StratifiedOmniVelocityCommandCfg(RecoveryVelocityCommandCfg):
     low_speed_x_range: tuple[float, float] = (0.15, 0.40)
     """Signed x-command magnitudes oversampled for low-speed gait refinement."""
 
+    rel_low_speed_yaw: float = 0.0
+    """Fraction of yaw-bearing samples redrawn from :attr:`low_speed_yaw_range`."""
+
+    low_speed_yaw_range: tuple[float, float] = (0.08, 0.40)
+    """Signed yaw-command magnitudes oversampled for low-rate turning refinement."""
+
+    rel_high_speed_yaw: float = 0.0
+    """Fraction of yaw-bearing samples redrawn from :attr:`high_speed_yaw_range`."""
+
+    high_speed_yaw_range: tuple[float, float] = (0.8, 1.0)
+    """Signed yaw magnitudes oversampled near the current curriculum boundary."""
+
+    rel_low_speed_y: float = 0.0
+    """Fraction of lateral-bearing samples redrawn from :attr:`low_speed_y_range`."""
+
+    low_speed_y_range: tuple[float, float] = (0.05, 0.20)
+    """Signed lateral-command magnitudes oversampled for low-speed stepping."""
+
     negative_x_probability: float | None = None
     """Optional probability of a negative x command in the x-bearing bucket.
 
@@ -909,3 +1017,9 @@ class StratifiedOmniVelocityCommandCfg(RecoveryVelocityCommandCfg):
 
     combined_include_lateral: bool = True
     """Whether the combined bucket samples all axes instead of the common vx+wz case."""
+
+    flat_terrain_type_count: int | None = None
+    """Number of leading generated-terrain columns that retain the full ranges."""
+
+    rough_terrain_ranges: RecoveryVelocityCommandCfg.Ranges | None = None
+    """Per-axis ranges applied to all remaining non-flat terrain columns."""

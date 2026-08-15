@@ -24,6 +24,9 @@ HOME_POSITION = {
 }
 
 FOOT_NAMES = ("FR_foot", "FL_foot", "RR_foot", "RL_foot")
+LEG_COLLISION_BITS = {"FR": 2, "FL": 4, "RR": 8, "RL": 16}
+GROUND_COLLISION_BIT = 1
+JOINT_FRICTION_LOSS_NM = 0.01
 
 
 def restore_inertials(urdf_root: ET.Element, mjcf_root: ET.Element) -> None:
@@ -87,6 +90,33 @@ def configure_simulation(mjcf_root: ET.Element) -> None:
             "solref": "0.005 1.0",
         }
     )
+
+    for joint in mjcf_root.findall(".//joint"):
+        if joint.attrib.get("type", "hinge") == "hinge":
+            joint.attrib["frictionloss"] = str(JOINT_FRICTION_LOSS_NM)
+
+
+def configure_selective_self_collisions(mjcf_root: ET.Element) -> None:
+    """Enable cross-leg contact while filtering all links within the same leg."""
+
+    all_leg_bits = sum(LEG_COLLISION_BITS.values())
+    collision_counts = dict.fromkeys(LEG_COLLISION_BITS, 0)
+    for body in mjcf_root.findall(".//body"):
+        body_name = body.attrib.get("name", "")
+        leg = next((name for name in LEG_COLLISION_BITS if body_name.startswith(f"{name}_")), None)
+        if leg is None:
+            continue
+        own_bit = LEG_COLLISION_BITS[leg]
+        affinity = GROUND_COLLISION_BIT | (all_leg_bits & ~own_bit)
+        for geom in body.findall("geom"):
+            if geom.attrib.get("class") != "collision":
+                continue
+            geom.attrib.update({"contype": str(own_bit), "conaffinity": str(affinity)})
+            collision_counts[leg] += 1
+
+    missing = [leg for leg, count in collision_counts.items() if count == 0]
+    if missing:
+        raise ValueError(f"MJCF is missing collision geoms for legs: {missing}")
 
 
 def add_observation_sensors(mjcf_root: ET.Element) -> None:
@@ -172,6 +202,11 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--urdf", type=Path, required=True)
     parser.add_argument("--mjcf", type=Path, required=True)
+    parser.add_argument(
+        "--selective-self-collisions",
+        action="store_true",
+        help="Enable contact across different legs while filtering links within each leg",
+    )
     args = parser.parse_args()
 
     urdf_tree = ET.parse(args.urdf)
@@ -179,6 +214,8 @@ def main() -> None:
     root = mjcf_tree.getroot()
     restore_inertials(urdf_tree.getroot(), root)
     configure_simulation(root)
+    if args.selective_self_collisions:
+        configure_selective_self_collisions(root)
     add_observation_sensors(root)
     add_home_keyframe(root)
     ET.indent(mjcf_tree, space="  ")

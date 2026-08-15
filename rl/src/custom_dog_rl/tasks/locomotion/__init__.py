@@ -618,6 +618,44 @@ gym.register(
     },
 )
 
+
+for stage, env_cfg, play_cfg in (
+    ("R0", "RobotSelfRightingR0EnvCfg", "RobotSelfRightingR0PlayEnvCfg"),
+    ("R1", "RobotSelfRightingR1EnvCfg", "RobotSelfRightingR1PlayEnvCfg"),
+    ("R2", "RobotSelfRightingR2EnvCfg", "RobotSelfRightingR2PlayEnvCfg"),
+):
+    gym.register(
+        id=f"CustomDog-SelfRighting-{stage}-v2",
+        entry_point="isaaclab.envs:ManagerBasedRLEnv",
+        disable_env_checker=True,
+        kwargs={
+            "env_cfg_entry_point": f"{__name__}.velocity_env_cfg:{env_cfg}",
+            "play_env_cfg_entry_point": f"{__name__}.velocity_env_cfg:{play_cfg}",
+            "rsl_rl_cfg_entry_point": (
+                "custom_dog_rl.agents.ppo_cfg:CustomDogSelfRightingPPORunnerCfg"
+            ),
+        },
+    )
+
+
+gym.register(
+    id="CustomDog-Velocity-ClosedLoop-History213-Distill-v1",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": (
+            f"{__name__}.velocity_env_cfg:RobotClosedLoopHistory213DistillationEnvCfg"
+        ),
+        "play_env_cfg_entry_point": (
+            f"{__name__}.velocity_env_cfg:RobotClosedLoopHistory213DistillationPlayEnvCfg"
+        ),
+        "rsl_rl_cfg_entry_point": (
+            "custom_dog_rl.agents.ppo_cfg:"
+            "CustomDogClosedLoopHistory213DistillationRunnerCfg"
+        ),
+    },
+)
+
 gym.register(
     id="CustomDog-Velocity-Omni45-v2",
     entry_point="isaaclab.envs:ManagerBasedRLEnv",
@@ -654,6 +692,337 @@ gym.register(
         "rsl_rl_cfg_entry_point": "custom_dog_rl.agents.ppo_cfg:CustomDogOmniTrotPPORunnerCfg",
     },
 )
+
+gym.register(
+    id="CustomDog-Velocity-OmniTrot-Posture-v2",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.velocity_env_cfg:RobotOmniTrotPostureEnvCfg",
+        "play_env_cfg_entry_point": (
+            f"{__name__}.velocity_env_cfg:RobotOmniTrotPosturePlayEnvCfg"
+        ),
+        "rsl_rl_cfg_entry_point": (
+            "custom_dog_rl.agents.ppo_cfg:CustomDogOmniTrotPosturePPORunnerCfg"
+        ),
+    },
+)
+
+
+gym.register(
+    id="CustomDog-Velocity-OmniTrot-Refine-v3",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.velocity_env_cfg:RobotOmniTrotRefineEnvCfg",
+        "play_env_cfg_entry_point": (
+            f"{__name__}.velocity_env_cfg:RobotOmniTrotRefinePlayEnvCfg"
+        ),
+        "rsl_rl_cfg_entry_point": (
+            "custom_dog_rl.agents.ppo_cfg:CustomDogOmniTrotRefinePPORunnerCfg"
+        ),
+    },
+)
+
+
+gym.register(
+    id="CustomDog-Velocity-OmniTrot-ClosedLoopFoundation-v1",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": (
+            f"{__name__}.velocity_env_cfg:RobotOmniTrotClosedLoopFoundationEnvCfg"
+        ),
+        "play_env_cfg_entry_point": (
+            f"{__name__}.velocity_env_cfg:RobotOmniTrotClosedLoopFoundationPlayEnvCfg"
+        ),
+        "rsl_rl_cfg_entry_point": (
+            "custom_dog_rl.agents.ppo_cfg:CustomDogOmniTrotClosedLoopExpansionPPORunnerCfg"
+        ),
+    },
+)
+
+
+gym.register(
+    id="CustomDog-Velocity-OmniTrot-ClosedLoopPolishA1-v1",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": (
+            f"{__name__}.velocity_env_cfg:RobotOmniTrotClosedLoopPolishA1EnvCfg"
+        ),
+        "play_env_cfg_entry_point": (
+            f"{__name__}.velocity_env_cfg:RobotOmniTrotClosedLoopPolishA1PlayEnvCfg"
+        ),
+        "rsl_rl_cfg_entry_point": (
+            "custom_dog_rl.agents.ppo_cfg:CustomDogOmniTrotClosedLoopPolishPPORunnerCfg"
+        ),
+    },
+)
+
+gym.register(
+    id="CustomDog-Velocity-OmniTrot-ClosedLoopPolishA2-v1",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": (
+            f"{__name__}.velocity_env_cfg:RobotOmniTrotClosedLoopPolishA2EnvCfg"
+        ),
+        "play_env_cfg_entry_point": (
+            f"{__name__}.velocity_env_cfg:RobotOmniTrotClosedLoopPolishA2PlayEnvCfg"
+        ),
+        "rsl_rl_cfg_entry_point": (
+            "custom_dog_rl.agents.ppo_cfg:CustomDogOmniTrotClosedLoopPolishPPORunnerCfg"
+        ),
+    },
+)
+
+gym.register(
+    id="CustomDog-Velocity-OmniTrot-ClosedLoopStandFix-v1",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": (
+            f"{__name__}.velocity_env_cfg:RobotOmniTrotClosedLoopStandFixEnvCfg"
+        ),
+        "play_env_cfg_entry_point": (
+            f"{__name__}.velocity_env_cfg:RobotOmniTrotClosedLoopStandFixPlayEnvCfg"
+        ),
+        "rsl_rl_cfg_entry_point": (
+            "custom_dog_rl.agents.ppo_cfg:CustomDogOmniTrotClosedLoopPolishPPORunnerCfg"
+        ),
+    },
+)
+
+
+gym.register(
+    id="CustomDog-Velocity-OmniTrot-ClosedLoopCrossPhysics-v1",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": (
+            f"{__name__}.velocity_env_cfg:RobotOmniTrotClosedLoopCrossPhysicsEnvCfg"
+        ),
+        "play_env_cfg_entry_point": (
+            f"{__name__}.velocity_env_cfg:RobotOmniTrotClosedLoopCrossPhysicsPlayEnvCfg"
+        ),
+        "rsl_rl_cfg_entry_point": (
+            "custom_dog_rl.agents.ppo_cfg:CustomDogOmniTrotClosedLoopCrossPhysicsPPORunnerCfg"
+        ),
+    },
+)
+
+
+gym.register(
+    id="CustomDog-Velocity-OmniTrot-ClosedLoopRobustFoundation-v1",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": (
+            f"{__name__}.velocity_env_cfg:RobotOmniTrotClosedLoopRobustFoundationEnvCfg"
+        ),
+        "play_env_cfg_entry_point": (
+            f"{__name__}.velocity_env_cfg:RobotOmniTrotClosedLoopRobustFoundationPlayEnvCfg"
+        ),
+        "rsl_rl_cfg_entry_point": (
+            "custom_dog_rl.agents.ppo_cfg:CustomDogOmniTrotClosedLoopFoundationPPORunnerCfg"
+        ),
+    },
+)
+
+
+gym.register(
+    id="CustomDog-Velocity-OmniTrot-RobustStandFix-v1",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": (
+            f"{__name__}.velocity_env_cfg:RobotOmniTrotRobustStandFixEnvCfg"
+        ),
+        "play_env_cfg_entry_point": (
+            f"{__name__}.velocity_env_cfg:RobotOmniTrotRobustStandFixPlayEnvCfg"
+        ),
+        "rsl_rl_cfg_entry_point": (
+            "custom_dog_rl.agents.ppo_cfg:CustomDogOmniTrotRobustStandFixPPORunnerCfg"
+        ),
+    },
+)
+
+
+gym.register(
+    id="CustomDog-Stand-ClosedLoop-v1",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.velocity_env_cfg:RobotStandExpertEnvCfg",
+        "play_env_cfg_entry_point": f"{__name__}.velocity_env_cfg:RobotStandExpertPlayEnvCfg",
+        "rsl_rl_cfg_entry_point": (
+            "custom_dog_rl.agents.ppo_cfg:CustomDogStandExpertPPORunnerCfg"
+        ),
+    },
+)
+
+
+gym.register(
+    id="CustomDog-Stand-HeightCalibrated-v2",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": (
+            f"{__name__}.velocity_env_cfg:RobotStandHeightCalibratedEnvCfg"
+        ),
+        "play_env_cfg_entry_point": (
+            f"{__name__}.velocity_env_cfg:RobotStandHeightCalibratedPlayEnvCfg"
+        ),
+        "rsl_rl_cfg_entry_point": (
+            "custom_dog_rl.agents.ppo_cfg:CustomDogStandHeightCalibratedPPORunnerCfg"
+        ),
+    },
+)
+
+
+gym.register(
+    id="CustomDog-Stand-HeightHipCalibrated-v3",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": (
+            f"{__name__}.velocity_env_cfg:RobotStandHeightHipCalibratedEnvCfg"
+        ),
+        "play_env_cfg_entry_point": (
+            f"{__name__}.velocity_env_cfg:RobotStandHeightHipCalibratedPlayEnvCfg"
+        ),
+        "rsl_rl_cfg_entry_point": (
+            "custom_dog_rl.agents.ppo_cfg:CustomDogStandHeightCalibratedPPORunnerCfg"
+        ),
+    },
+)
+
+
+gym.register(
+    id="CustomDog-Velocity-OmniTrot-ClosedLoopSelectiveCollision-v1",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": (
+            f"{__name__}.velocity_env_cfg:RobotOmniTrotClosedLoopSelectiveCollisionEnvCfg"
+        ),
+        "play_env_cfg_entry_point": (
+            f"{__name__}.velocity_env_cfg:RobotOmniTrotClosedLoopSelectiveCollisionPlayEnvCfg"
+        ),
+        "rsl_rl_cfg_entry_point": (
+            "custom_dog_rl.agents.ppo_cfg:CustomDogOmniTrotClosedLoopCrossPhysicsPPORunnerCfg"
+        ),
+    },
+)
+
+
+gym.register(
+    id="CustomDog-Velocity-OmniTrot-ClosedLoopStageB-v1",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": (
+            f"{__name__}.velocity_env_cfg:RobotOmniTrotClosedLoopStageBEnvCfg"
+        ),
+        "play_env_cfg_entry_point": (
+            f"{__name__}.velocity_env_cfg:RobotOmniTrotClosedLoopStageBPlayEnvCfg"
+        ),
+        "rsl_rl_cfg_entry_point": (
+            "custom_dog_rl.agents.ppo_cfg:CustomDogOmniTrotClosedLoopExpansionPPORunnerCfg"
+        ),
+    },
+)
+
+gym.register(
+    id="CustomDog-Velocity-OmniTrot-ClosedLoopStageC-v1",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": (
+            f"{__name__}.velocity_env_cfg:RobotOmniTrotClosedLoopStageCEnvCfg"
+        ),
+        "play_env_cfg_entry_point": (
+            f"{__name__}.velocity_env_cfg:RobotOmniTrotClosedLoopStageCPlayEnvCfg"
+        ),
+        "rsl_rl_cfg_entry_point": (
+            "custom_dog_rl.agents.ppo_cfg:CustomDogOmniTrotClosedLoopExpansionPPORunnerCfg"
+        ),
+    },
+)
+
+gym.register(
+    id="CustomDog-Velocity-OmniTrot-ClosedLoopStageD-v1",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": (
+            f"{__name__}.velocity_env_cfg:RobotOmniTrotClosedLoopStageDEnvCfg"
+        ),
+        "play_env_cfg_entry_point": (
+            f"{__name__}.velocity_env_cfg:RobotOmniTrotClosedLoopStageDPlayEnvCfg"
+        ),
+        "rsl_rl_cfg_entry_point": (
+            "custom_dog_rl.agents.ppo_cfg:CustomDogOmniTrotClosedLoopExpansionPPORunnerCfg"
+        ),
+    },
+)
+
+
+gym.register(
+    id="CustomDog-Velocity-OmniTrot-ClosedLoopGaitRobust-v1",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": (
+            f"{__name__}.velocity_env_cfg:RobotOmniTrotClosedLoopGaitRobustEnvCfg"
+        ),
+        "play_env_cfg_entry_point": (
+            f"{__name__}.velocity_env_cfg:RobotOmniTrotClosedLoopGaitRobustPlayEnvCfg"
+        ),
+        "rsl_rl_cfg_entry_point": (
+            "custom_dog_rl.agents.ppo_cfg:CustomDogOmniTrotClosedLoopExpansionPPORunnerCfg"
+        ),
+    },
+)
+
+
+gym.register(
+    id="CustomDog-Velocity-OmniTrot-DynamicsTeacher-v1",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": (
+            f"{__name__}.velocity_env_cfg:RobotOmniTrotDynamicsTeacherEnvCfg"
+        ),
+        "play_env_cfg_entry_point": (
+            f"{__name__}.velocity_env_cfg:RobotOmniTrotDynamicsTeacherPlayEnvCfg"
+        ),
+        "rsl_rl_cfg_entry_point": (
+            "custom_dog_rl.agents.ppo_cfg:CustomDogDynamicsTeacherPPORunnerCfg"
+        ),
+    },
+)
+
+
+for stage, env_cfg, play_cfg in (
+    ("T0", "RobotOmniTrotTerrainT0EnvCfg", "RobotOmniTrotTerrainT0PlayEnvCfg"),
+    ("T1", "RobotOmniTrotTerrainT1EnvCfg", "RobotOmniTrotTerrainT1PlayEnvCfg"),
+):
+    gym.register(
+        id=f"CustomDog-Velocity-OmniTrot-Terrain{stage}-v1",
+        entry_point="isaaclab.envs:ManagerBasedRLEnv",
+        disable_env_checker=True,
+        kwargs={
+            "env_cfg_entry_point": f"{__name__}.velocity_env_cfg:{env_cfg}",
+            "play_env_cfg_entry_point": f"{__name__}.velocity_env_cfg:{play_cfg}",
+            "rsl_rl_cfg_entry_point": (
+                "custom_dog_rl.agents.ppo_cfg:"
+                "CustomDogDynamicsTeacherPPORunnerCfg"
+            ),
+        },
+    )
+
 
 gym.register(
     id="CustomDog-Velocity-Omni45-Polish-v3",

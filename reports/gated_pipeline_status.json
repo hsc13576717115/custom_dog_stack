@@ -1,0 +1,120 @@
+{
+  "all_complete": false,
+  "manual_review_ready": true,
+  "required_stages": [
+    "initial_six_checkpoint_grid",
+    "keyboard_sim2sim_review",
+    "routed_stage_a_seed42",
+    "routed_stage_a_seed73",
+    "selective_collision_runtime",
+    "selective_collision_stage_a",
+    "closed_loop_stage_b",
+    "closed_loop_stage_c",
+    "closed_loop_stage_d",
+    "self_righting_r0",
+    "self_righting_r1",
+    "self_righting_r2",
+    "gait_robust",
+    "dynamics_teacher",
+    "terrain_t0",
+    "terrain_t1",
+    "history213_distillation",
+    "recovery_locomotion_handoff"
+  ],
+  "stages": {
+    "initial_six_checkpoint_grid": {
+      "status": "complete",
+      "evidence": "/home/hsc/Dog_RL/custom_dog_stack/logs/rsl_rl/custom_dog_velocity/2026-08-14_15-13-55_omni_trot_closed_loop_foundation_seed42/evaluation/stage_a_grid_10s.json",
+      "exported_checkpoints": [
+        625,
+        775,
+        875,
+        900,
+        975,
+        999
+      ],
+      "command_counts": {
+        "model_625": 15,
+        "model_775": 15,
+        "model_875": 15,
+        "model_900": 15,
+        "model_975": 15,
+        "model_999": 15
+      },
+      "missing": []
+    },
+    "keyboard_sim2sim_review": {
+      "status": "ready_for_user",
+      "evidence": "/home/hsc/Dog_RL/custom_dog_stack/reports/stage_a_six_checkpoint_ranking.json",
+      "candidates": [
+        "model_875",
+        "model_975",
+        "model_999"
+      ]
+    },
+    "routed_stage_a_seed42": {
+      "status": "complete",
+      "evidence": "/home/hsc/Dog_RL/custom_dog_stack/logs/rsl_rl/custom_dog_velocity/2026-08-14_22-32-41_stand_height_hip_calibrated_from319/evaluation/routed_stage_a_selection.json",
+      "accepted": true,
+      "selected": "ROUTED_A",
+      "selected_candidate": "/home/hsc/Dog_RL/custom_dog_stack/deploy/candidates/closed_loop_stage_a_routed_seed42"
+    },
+    "routed_stage_a_seed73": {
+      "status": "complete",
+      "evidence": "/home/hsc/Dog_RL/custom_dog_stack/logs/rsl_rl/custom_dog_velocity/2026-08-14_22-51-06_closed_loop_robust_foundation_seed73/evaluation/routed_robust_foundation_selection.json",
+      "accepted": true,
+      "selected": "RFR_999",
+      "selected_candidate": "/home/hsc/Dog_RL/custom_dog_stack/logs/rsl_rl/custom_dog_velocity/2026-08-14_22-51-06_closed_loop_robust_foundation_seed73/evaluation/routed_candidates/model_999"
+    },
+    "selective_collision_runtime": {
+      "status": "complete",
+      "evidence": "/home/hsc/Dog_RL/custom_dog_stack/reports/selective_collision_isaac_runtime.json",
+      "accepted": true
+    },
+    "selective_collision_stage_a": {
+      "status": "complete",
+      "evidence": "/home/hsc/Dog_RL/custom_dog_stack/logs/rsl_rl/custom_dog_velocity/2026-08-15_12-53-59_closed_loop_selective_collision_stage_a/evaluation/selective_collision_selection.json",
+      "accepted": true,
+      "selected": "SC_740",
+      "selected_candidate": "/home/hsc/Dog_RL/custom_dog_stack/logs/rsl_rl/custom_dog_velocity/2026-08-15_12-53-59_closed_loop_selective_collision_stage_a/evaluation/routed_candidates/model_740",
+      "training_asset_path": "/home/hsc/Dog_RL/custom_dog_stack/ros2/src/custom_dog_description/urdf/custom_dog_selective_collision.urdf"
+    },
+    "closed_loop_stage_b": {
+      "status": "pending"
+    },
+    "closed_loop_stage_c": {
+      "status": "pending"
+    },
+    "closed_loop_stage_d": {
+      "status": "pending"
+    },
+    "self_righting_r0": {
+      "status": "pending"
+    },
+    "self_righting_r1": {
+      "status": "pending"
+    },
+    "self_righting_r2": {
+      "status": "pending"
+    },
+    "gait_robust": {
+      "status": "pending"
+    },
+    "dynamics_teacher": {
+      "status": "pending"
+    },
+    "terrain_t0": {
+      "status": "pending"
+    },
+    "terrain_t1": {
+      "status": "pending"
+    },
+    "history213_distillation": {
+      "status": "pending"
+    },
+    "recovery_locomotion_handoff": {
+      "status": "pending",
+      "accepted": false
+    }
+  }
+}

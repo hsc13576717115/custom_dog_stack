@@ -6,17 +6,107 @@ from isaaclab.managers import ObservationGroupCfg as ObsGroup
 from isaaclab.managers import ObservationTermCfg as ObsTerm
 from isaaclab.managers import RewardTermCfg as RewTerm
 from isaaclab.managers import SceneEntityCfg
+from isaaclab.managers import TerminationTermCfg as DoneTerm
+import isaaclab.terrains as terrain_gen
 from isaaclab.utils import configclass
+from isaaclab.utils.noise import AdditiveUniformNoiseCfg as Unoise
 
 from custom_dog_rl.assets.custom_dog import (
     CUSTOM_DOG_CFG,
     CUSTOM_DOG_COMPACT_HIP_CFG,
+    CUSTOM_DOG_SELECTIVE_SELF_COLLISION_CFG,
 )
 from custom_dog_rl.tasks.locomotion import mdp as custom_mdp
 from unitree_rl_lab.tasks.locomotion import mdp
 from unitree_rl_lab.tasks.locomotion.robots.go2.velocity_env_cfg import (
     ObservationsCfg as Go2ObservationsCfg,
     RobotEnvCfg as Go2RobotEnvCfg,
+)
+
+
+CUSTOM_DOG_TERRAIN_T0_CFG = terrain_gen.TerrainGeneratorCfg(
+    curriculum=True,
+    size=(8.0, 8.0),
+    border_width=20.0,
+    num_rows=10,
+    num_cols=20,
+    horizontal_scale=0.1,
+    vertical_scale=0.005,
+    slope_threshold=0.75,
+    difficulty_range=(0.0, 1.0),
+    use_cache=False,
+    sub_terrains={
+        "flat": terrain_gen.MeshPlaneTerrainCfg(proportion=0.40),
+        "mild_rough": terrain_gen.HfRandomUniformTerrainCfg(
+            proportion=0.30,
+            noise_range=(0.005, 0.025),
+            noise_step=0.005,
+            border_width=0.25,
+        ),
+        "mild_slope": terrain_gen.HfPyramidSlopedTerrainCfg(
+            proportion=0.15,
+            slope_range=(0.0, 0.12),
+            platform_width=2.0,
+            border_width=0.25,
+        ),
+        "mild_slope_inv": terrain_gen.HfInvertedPyramidSlopedTerrainCfg(
+            proportion=0.15,
+            slope_range=(0.0, 0.12),
+            platform_width=2.0,
+            border_width=0.25,
+        ),
+    },
+)
+
+
+CUSTOM_DOG_TERRAIN_T1_CFG = terrain_gen.TerrainGeneratorCfg(
+    curriculum=True,
+    size=(8.0, 8.0),
+    border_width=20.0,
+    num_rows=10,
+    num_cols=20,
+    horizontal_scale=0.1,
+    vertical_scale=0.005,
+    slope_threshold=0.75,
+    difficulty_range=(0.0, 1.0),
+    use_cache=False,
+    sub_terrains={
+        "flat": terrain_gen.MeshPlaneTerrainCfg(proportion=0.40),
+        "rough": terrain_gen.HfRandomUniformTerrainCfg(
+            proportion=0.20,
+            noise_range=(0.01, 0.05),
+            noise_step=0.005,
+            border_width=0.25,
+        ),
+        "slope": terrain_gen.HfPyramidSlopedTerrainCfg(
+            proportion=0.10,
+            slope_range=(0.0, 0.22),
+            platform_width=2.0,
+            border_width=0.25,
+        ),
+        "slope_inv": terrain_gen.HfInvertedPyramidSlopedTerrainCfg(
+            proportion=0.10,
+            slope_range=(0.0, 0.22),
+            platform_width=2.0,
+            border_width=0.25,
+        ),
+        "low_stairs": terrain_gen.MeshPyramidStairsTerrainCfg(
+            proportion=0.10,
+            step_height_range=(0.02, 0.08),
+            step_width=0.35,
+            platform_width=3.0,
+            border_width=1.0,
+            holes=False,
+        ),
+        "low_stairs_inv": terrain_gen.MeshInvertedPyramidStairsTerrainCfg(
+            proportion=0.10,
+            step_height_range=(0.02, 0.08),
+            step_width=0.35,
+            platform_width=3.0,
+            border_width=1.0,
+            holes=False,
+        ),
+    },
 )
 
 
@@ -32,10 +122,40 @@ class PrivilegedVelocityTeacherObsCfg(Go2ObservationsCfg.PolicyCfg):
 
 
 @configclass
+class PrivilegedClosedLoopTeacherObsCfg(Go2ObservationsCfg.PolicyCfg):
+    """Exact 51-D closed-loop teacher: base state, trot clock, and true vx/vy."""
+
+    trot_clock = ObsTerm(
+        func=custom_mdp.command_trot_clock,
+        params={
+            "command_name": "base_velocity",
+            "command_threshold": 0.03,
+            "yaw_command_threshold": 0.05,
+            "min_frequency": 1.4,
+            "max_frequency": 3.2,
+            "full_speed": 3.0,
+            "yaw_speed_scale": 0.35,
+        },
+    )
+    base_lin_vel_xy = ObsTerm(
+        func=custom_mdp.base_lin_vel_xy,
+        scale=1.0,
+        clip=(-2.0, 2.0),
+    )
+
+
+@configclass
 class HistoryDistillationObservationsCfg(Go2ObservationsCfg):
     """Separate deployable student and privileged teacher observation groups."""
 
     teacher: ObsGroup = PrivilegedVelocityTeacherObsCfg()
+
+
+@configclass
+class ClosedLoopHistoryDistillationObservationsCfg(Go2ObservationsCfg):
+    """Deployable 213-D history student and exact 51-D closed-loop teacher."""
+
+    teacher: ObsGroup = PrivilegedClosedLoopTeacherObsCfg()
 
 
 @configclass
@@ -3174,6 +3294,180 @@ class RobotRecoveryOmniFullPlayEnvCfg(RobotRecoveryOmniFullEnvCfg):
 
 
 @configclass
+class RobotSelfRightingR0EnvCfg(RobotEnvCfg):
+    """Dedicated zero-command recovery from the measured belly-down fold."""
+
+    def __post_init__(self):
+        super().__post_init__()
+        self.scene.robot.spawn = CUSTOM_DOG_SELECTIVE_SELF_COLLISION_CFG.spawn.copy()
+        self.episode_length_s = 5.0
+
+        self.events.reset_base = EventTerm(
+            func=custom_mdp.reset_self_righting_states,
+            mode="reset",
+            params={
+                "orientation_probabilities": (1.0, 0.0, 0.0, 0.0),
+                "arbitrary_orientation_probability": 0.0,
+                "root_height_range": (0.08, 0.10),
+                "hip_position_range": (-0.03, 0.03),
+                "thigh_position_range": (1.20, 1.28),
+                "calf_position_range": (-2.84, -2.76),
+                "max_linear_velocity": 0.0,
+                "max_angular_velocity": 0.0,
+                "root_xy_range": (-0.20, 0.20),
+            },
+        )
+        self.events.reset_robot_joints = None
+        self.events.push_robot = None
+        self.events.physics_material.params["static_friction_range"] = (0.75, 1.15)
+        self.events.physics_material.params["dynamic_friction_range"] = (0.70, 1.10)
+        self.events.physics_material.params["restitution_range"] = (0.0, 0.05)
+        self.events.add_base_mass.params["mass_distribution_params"] = (-0.25, 0.25)
+
+        command = self.commands.base_velocity
+        command.rel_standing_envs = 1.0
+        command.heading_command = False
+        for ranges in (command.ranges, command.limit_ranges):
+            ranges.lin_vel_x = (0.0, 0.0)
+            ranges.lin_vel_y = (0.0, 0.0)
+            ranges.ang_vel_z = (0.0, 0.0)
+        self.curriculum.lin_vel_cmd_levels = None
+        self.curriculum.terrain_levels = None
+        if self.scene.terrain.terrain_generator is not None:
+            self.scene.terrain.terrain_generator.curriculum = False
+
+        feet_contact_cfg = SceneEntityCfg(
+            "contact_forces",
+            body_names=["FR_foot", "FL_foot", "RR_foot", "RL_foot"],
+            preserve_order=True,
+        )
+        success_params = {
+            "minimum_height": 0.27,
+            "maximum_tilt_deg": 15.0,
+            "maximum_angular_velocity": 0.50,
+            "minimum_contact_feet": 4,
+            "contact_force_threshold": 1.0,
+            "sensor_cfg": feet_contact_cfg,
+        }
+        self.terminations.base_contact = None
+        self.terminations.bad_orientation = None
+        self.terminations.recovery_success = DoneTerm(
+            func=custom_mdp.recovery_success_dwell,
+            params={"dwell_time_s": 0.40, **success_params},
+        )
+
+        self.rewards.track_lin_vel_xy.weight = 0.0
+        self.rewards.track_ang_vel_z.weight = 0.0
+        self.rewards.base_linear_velocity.weight = 0.0
+        self.rewards.base_angular_velocity.weight = 0.0
+        self.rewards.joint_vel.weight = -1.0e-4
+        self.rewards.joint_acc.weight = -1.0e-7
+        self.rewards.joint_torques.weight = -5.0e-5
+        self.rewards.action_rate.weight = -0.02
+        self.rewards.dof_pos_limits.weight = -5.0
+        self.rewards.energy.weight = -1.0e-5
+        self.rewards.flat_orientation_l2.weight = 0.0
+        self.rewards.joint_pos.weight = 0.0
+        self.rewards.feet_air_time.weight = 0.0
+        self.rewards.air_time_variance.weight = 0.0
+        self.rewards.feet_slide.weight = 0.0
+        self.rewards.undesired_contacts.weight = 0.0
+        self.rewards.recovery_orientation = RewTerm(
+            func=custom_mdp.recovery_orientation_progress,
+            weight=2.0,
+        )
+        self.rewards.recovery_upright_height = RewTerm(
+            func=custom_mdp.recovery_upright_height,
+            weight=3.0,
+            params={
+                "prone_height": 0.07,
+                "standing_height": 0.30,
+                "prone_only": False,
+            },
+        )
+        self.rewards.recovery_stable_support = RewTerm(
+            func=custom_mdp.recovery_stable_support,
+            weight=4.0,
+            params={
+                "prone_height": 0.07,
+                "standing_height": 0.30,
+                "angular_velocity_std": 0.75,
+                "contact_force_threshold": 1.0,
+                "sensor_cfg": feet_contact_cfg,
+            },
+        )
+        self.rewards.recovery_success = RewTerm(
+            func=custom_mdp.recovery_success_state,
+            weight=10.0,
+            params=success_params,
+        )
+        self.rewards.time_cost = RewTerm(func=mdp.is_alive, weight=-0.05)
+        if hasattr(self.rewards, "termination_penalty"):
+            self.rewards.termination_penalty = None
+
+
+@configclass
+class RobotSelfRightingR0PlayEnvCfg(RobotSelfRightingR0EnvCfg):
+    def __post_init__(self):
+        super().__post_init__()
+        self.scene.num_envs = 32
+        self.scene.terrain.terrain_generator.num_rows = 2
+        self.scene.terrain.terrain_generator.num_cols = 1
+
+
+@configclass
+class RobotSelfRightingR1EnvCfg(RobotSelfRightingR0EnvCfg):
+    """Expand recovery to back-down and both side-lying orientations."""
+
+    def __post_init__(self):
+        super().__post_init__()
+        self.episode_length_s = 6.0
+        params = self.events.reset_base.params
+        params["orientation_probabilities"] = (0.25, 0.25, 0.25, 0.25)
+        params["root_height_range"] = (0.11, 0.16)
+        params["hip_position_range"] = (-0.20, 0.20)
+        params["thigh_position_range"] = (0.90, 1.55)
+        params["calf_position_range"] = (-2.85, -1.90)
+        params["max_linear_velocity"] = 0.15
+        params["max_angular_velocity"] = 0.35
+
+
+@configclass
+class RobotSelfRightingR1PlayEnvCfg(RobotSelfRightingR1EnvCfg):
+    def __post_init__(self):
+        super().__post_init__()
+        self.scene.num_envs = 32
+        self.scene.terrain.terrain_generator.num_rows = 2
+        self.scene.terrain.terrain_generator.num_cols = 1
+
+
+@configclass
+class RobotSelfRightingR2EnvCfg(RobotSelfRightingR1EnvCfg):
+    """Final flat-ground recovery distribution with arbitrary dynamic falls."""
+
+    def __post_init__(self):
+        super().__post_init__()
+        self.episode_length_s = 7.0
+        params = self.events.reset_base.params
+        params["arbitrary_orientation_probability"] = 0.35
+        params["root_height_range"] = (0.14, 0.24)
+        params["hip_position_range"] = (-0.45, 0.45)
+        params["thigh_position_range"] = (0.45, 1.75)
+        params["calf_position_range"] = (-2.85, -1.10)
+        params["max_linear_velocity"] = 0.50
+        params["max_angular_velocity"] = 1.50
+
+
+@configclass
+class RobotSelfRightingR2PlayEnvCfg(RobotSelfRightingR2EnvCfg):
+    def __post_init__(self):
+        super().__post_init__()
+        self.scene.num_envs = 32
+        self.scene.terrain.terrain_generator.num_rows = 2
+        self.scene.terrain.terrain_generator.num_cols = 1
+
+
+@configclass
 class RobotRobustEnvCfg(RobotEnvCfg):
     """Low-speed fine-tuning task with deployment-like reset perturbations."""
 
@@ -3531,7 +3825,1396 @@ class RobotOmniTrotEnvCfg(RobotOmni45V2EnvCfg):
 
 
 @configclass
+class RobotOmniTrotClosedLoopFoundationEnvCfg(RobotOmniTrotEnvCfg):
+    """Random-init 51-D trot teacher with explicit planar velocity feedback.
+
+    This is deliberately separate from the 49-D continuation tasks.  The
+    actor sees the measured body-frame ``vx/vy`` from iteration zero, while
+    the four-value trot clock keeps the desired diagonal gait observable.
+    """
+
+    def __post_init__(self):
+        super().__post_init__()
+
+        # The actor contract is 45-D base state + 4-D trot clock + 2-D
+        # measured planar velocity.  The critic already has privileged base
+        # velocity, so only the policy group is extended here.
+        self.observations.policy.base_lin_vel_xy = ObsTerm(
+            func=custom_mdp.base_lin_vel_xy,
+            scale=1.0,
+            clip=(-2.0, 2.0),
+        )
+
+        command = self.commands.base_velocity
+        command.resampling_time_range = (6.0, 8.0)
+        command.ranges = command.Ranges(
+            lin_vel_x=(-0.45, 0.45),
+            lin_vel_y=(-0.10, 0.10),
+            ang_vel_z=(-0.25, 0.25),
+        )
+        # Do not advertise the final joystick envelope in deploy.yaml before
+        # this stage has passed the fixed MuJoCo grid.
+        command.limit_ranges = command.Ranges(
+            lin_vel_x=(-0.45, 0.45),
+            lin_vel_y=(-0.10, 0.10),
+            ang_vel_z=(-0.25, 0.25),
+        )
+        command.bucket_probabilities = (0.30, 0.22, 0.28, 0.20)
+        command.minimum_command_magnitude = 0.03
+        command.rel_standing_envs = 0.10
+        command.negative_x_probability = 0.50
+        command.combined_include_lateral = True
+        command.rel_low_speed_x = 0.65
+        command.low_speed_x_range = (0.03, 0.20)
+        command.rel_low_speed_y = 0.65
+        command.low_speed_y_range = (0.03, 0.10)
+        command.rel_low_speed_yaw = 0.70
+        command.low_speed_yaw_range = (0.05, 0.20)
+        self.curriculum.lin_vel_cmd_levels = None
+        self.curriculum.omni_velocity_cmd_levels = None
+
+        planar_deadband = 0.03
+        yaw_deadband = 0.05
+        for clock in (self.observations.policy.trot_clock, self.observations.critic.trot_clock):
+            clock.params.update(
+                {
+                    "command_threshold": planar_deadband,
+                    "yaw_command_threshold": yaw_deadband,
+                }
+            )
+        for reward in (self.rewards.trot_contact_schedule, self.rewards.trot_stance_swing_tracking):
+            reward.params.update(
+                {
+                    "command_threshold": planar_deadband,
+                    "yaw_command_threshold": yaw_deadband,
+                }
+            )
+        self.rewards.trot_contact_schedule.weight = 1.75
+        self.rewards.trot_stance_swing_tracking.weight = 1.10
+
+        # Tracking is primary during discovery.  The relative and L2 terms
+        # keep small commands visible without making standing the cheapest
+        # solution.
+        self.rewards.track_lin_vel_xy.weight = 4.0
+        self.rewards.track_lin_vel_xy.params["std"] = 0.30
+        self.rewards.track_ang_vel_z.weight = 3.0
+        self.rewards.track_ang_vel_z.params["std"] = 0.28
+        self.rewards.track_velocity_components_relative_l1.weight = -1.5
+        self.rewards.track_velocity_components_relative_l1.params.update(
+            {
+                "command_min": (0.03, 0.03, 0.05),
+                "axis_weights": (1.0, 1.5, 1.5),
+            }
+        )
+        self.rewards.track_lin_vel_xy_l2 = RewTerm(
+            func=custom_mdp.track_lin_vel_xy_l2,
+            weight=-1.0,
+            params={"command_name": "base_velocity"},
+        )
+        self.rewards.track_ang_vel_z_l2 = RewTerm(
+            func=custom_mdp.track_ang_vel_z_l2,
+            weight=-1.25,
+            params={"command_name": "base_velocity"},
+        )
+        self.rewards.inactive_velocity_axes_l2 = RewTerm(
+            func=custom_mdp.inactive_velocity_axes_l2,
+            weight=-2.5,
+            params={
+                "command_name": "base_velocity",
+                "command_min": (0.03, 0.03, 0.05),
+                "axis_weights": (1.0, 1.5, 1.5),
+            },
+        )
+        self.rewards.pure_axis_velocity_decoupling = RewTerm(
+            func=custom_mdp.pure_axis_velocity_decoupling_l2,
+            weight=-3.0,
+            params={
+                "command_name": "base_velocity",
+                "command_min": (0.03, 0.03, 0.05),
+                "axis_weights": (1.0, 1.5, 1.5),
+            },
+        )
+
+        # Keep the trunk level and the body height in the requested band while
+        # allowing a smooth 0.33 -> 0.28 m crouch as speed rises.
+        self.rewards.speed_adaptive_base_height.weight = -35.0
+        self.rewards.speed_adaptive_base_height.params.update(
+            {
+                "standing_height": 0.33,
+                "crouched_height": 0.28,
+                "crouch_start_speed": 0.10,
+                "crouch_full_speed": 3.0,
+                "yaw_speed_scale": 0.35,
+                "command_name": "base_velocity",
+            }
+        )
+        self.rewards.flat_orientation_l2.weight = -5.0
+        self.rewards.base_angular_velocity.weight = -0.12
+        self.rewards.base_linear_velocity.weight = -2.5
+        self.rewards.energy.weight = -3.0e-5
+        self.rewards.action_rate.weight = -0.04
+        self.rewards.action_smoothness_2.weight = -0.02
+
+        # A symmetric calibrated home pose is active only while standing.
+        nominal_feet = (
+            0.1661,
+            -0.1694,
+            -0.2970,
+            0.1660,
+            0.1696,
+            -0.2970,
+            -0.2041,
+            -0.1696,
+            -0.2970,
+            -0.2050,
+            0.1695,
+            -0.2972,
+        )
+        self.rewards.joint_pos = RewTerm(
+            func=custom_mdp.joint_deviation_l2,
+            weight=-0.12,
+            params={
+                "asset_cfg": SceneEntityCfg("robot", joint_names=".*"),
+                "stand_still_scale": 3.0,
+                "velocity_threshold": 0.20,
+                "command_name": "base_velocity",
+                "planar_command_threshold": planar_deadband,
+                "yaw_command_threshold": yaw_deadband,
+            },
+        )
+        self.rewards.standing_foot_placement = RewTerm(
+            func=custom_mdp.standing_foot_placement_l2,
+            weight=-0.30,
+            params={
+                "asset_cfg": SceneEntityCfg(
+                    "robot",
+                    body_names=["FR_foot", "FL_foot", "RR_foot", "RL_foot"],
+                    preserve_order=True,
+                ),
+                "nominal_positions": nominal_feet,
+                "command_name": "base_velocity",
+                "planar_command_threshold": planar_deadband,
+                "yaw_command_threshold": yaw_deadband,
+                "velocity_threshold": 0.20,
+                "position_std": 0.045,
+                "max_error": 0.12,
+            },
+        )
+        self.rewards.hip_nominal = None
+        self.rewards.hip_outward_excess = None
+        self.rewards.hip_outward_band = RewTerm(
+            func=custom_mdp.hip_outward_band_l2,
+            weight=-4.0,
+            params={
+                "standing_band": (-0.02, 0.12),
+                "walking_band": (-0.04, 0.16),
+                "high_speed_band": (-0.06, 0.20),
+                "walking_speed": 0.35,
+                "high_speed": 2.0,
+                "lateral_allowance": 0.10,
+                "yaw_allowance": 0.04,
+                "command_name": "base_velocity",
+            },
+        )
+        self.rewards.calf_pair_separation = RewTerm(
+            func=custom_mdp.paired_lateral_separation_l2,
+            weight=-2.0,
+            params={
+                "asset_cfg": SceneEntityCfg(
+                    "robot",
+                    body_names=["FR_calf", "FL_calf", "RR_calf", "RL_calf"],
+                    preserve_order=True,
+                ),
+                "minimum_separation": 0.18,
+                "violation_scale": 0.05,
+                "lateral_allowance": 0.06,
+                "yaw_allowance": 0.02,
+                "command_name": "base_velocity",
+            },
+        )
+
+        contact_cfg = SceneEntityCfg(
+            "contact_forces",
+            body_names=["FR_foot", "FL_foot", "RR_foot", "RL_foot"],
+            preserve_order=True,
+        )
+        feet_cfg = SceneEntityCfg(
+            "robot",
+            body_names=["FR_foot", "FL_foot", "RR_foot", "RL_foot"],
+            preserve_order=True,
+        )
+        self.rewards.feet_air_time_command_aware = RewTerm(
+            func=custom_mdp.feet_air_time_command_aware,
+            weight=0.35,
+            params={
+                "sensor_cfg": contact_cfg,
+                "threshold": 0.12,
+                "command_name": "base_velocity",
+                "command_threshold": planar_deadband,
+                "yaw_speed_scale": 1.0,
+            },
+        )
+        self.rewards.foot_clearance_style = RewTerm(
+            func=custom_mdp.foot_clearance_speed_style,
+            weight=0.25,
+            params={
+                "sensor_cfg": contact_cfg,
+                "asset_cfg": feet_cfg,
+                "target_height": 0.055,
+                "std": 0.035,
+                "command_name": "base_velocity",
+                "command_threshold": planar_deadband,
+                "yaw_speed_scale": 1.0,
+            },
+        )
+        self.rewards.all_motion_swing_count = RewTerm(
+            func=custom_mdp.motion_swing_count,
+            weight=0.40,
+            params={
+                "sensor_cfg": contact_cfg,
+                "command_name": "base_velocity",
+                "planar_deadband": planar_deadband,
+                "yaw_deadband": yaw_deadband,
+                "target_airborne": 2.0,
+                "airborne_std": 0.75,
+            },
+        )
+
+
+@configclass
+class RobotOmniTrotClosedLoopFoundationPlayEnvCfg(RobotOmniTrotClosedLoopFoundationEnvCfg):
+    def __post_init__(self):
+        super().__post_init__()
+        self.scene.num_envs = 32
+        self.scene.terrain.terrain_generator.num_rows = 2
+        self.scene.terrain.terrain_generator.num_cols = 1
+        self.commands.base_velocity.ranges = self.commands.base_velocity.limit_ranges
+
+
+@configclass
+class RobotOmniTrotClosedLoopPolishA1EnvCfg(RobotOmniTrotClosedLoopFoundationEnvCfg):
+    """Correct Stage-A yaw overshoot and low standing height without expanding commands."""
+
+    def __post_init__(self):
+        super().__post_init__()
+
+        command = self.commands.base_velocity
+        command.resampling_time_range = (8.0, 12.0)
+        command.bucket_probabilities = (0.22, 0.13, 0.45, 0.20)
+        command.rel_standing_envs = 0.18
+        command.rel_low_speed_yaw = 0.80
+        command.low_speed_yaw_range = (0.05, 0.18)
+
+        # Stage A already passed planar tracking and pure-yaw XY drift, but
+        # consistently overshot the requested +/-0.25 rad/s yaw rate.
+        self.rewards.track_ang_vel_z.weight = 4.0
+        self.rewards.track_ang_vel_z.params["std"] = 0.20
+        self.rewards.track_ang_vel_z_l2.weight = -3.0
+        self.rewards.track_velocity_components_relative_l1.params["axis_weights"] = (
+            1.0,
+            1.5,
+            2.5,
+        )
+
+        # The zero-command MuJoCo height settled near 0.30 m despite the
+        # 0.33 m target. Strengthen height tracking and let the legs extend
+        # away from the nominal pose while retaining the foot XY footprint.
+        self.rewards.speed_adaptive_base_height.weight = -90.0
+        self.rewards.joint_pos.weight = -0.08
+        self.rewards.joint_pos.params["stand_still_scale"] = 1.5
+
+
+@configclass
+class RobotOmniTrotClosedLoopPolishA1PlayEnvCfg(RobotOmniTrotClosedLoopPolishA1EnvCfg):
+    def __post_init__(self):
+        super().__post_init__()
+        self.scene.num_envs = 32
+        self.scene.terrain.terrain_generator.num_rows = 2
+        self.scene.terrain.terrain_generator.num_cols = 1
+        self.commands.base_velocity.ranges = self.commands.base_velocity.limit_ranges
+
+
+@configclass
+class RobotOmniTrotClosedLoopPolishA2EnvCfg(RobotOmniTrotClosedLoopPolishA1EnvCfg):
+    """Correct the remaining Stage-A boundary-yaw and standing-band failures."""
+
+    def __post_init__(self):
+        super().__post_init__()
+
+        command = self.commands.base_velocity
+        command.bucket_probabilities = (0.18, 0.10, 0.52, 0.20)
+        command.rel_low_speed_yaw = 0.50
+        command.rel_high_speed_yaw = 0.40
+        command.high_speed_yaw_range = (0.20, 0.25)
+
+        # A1 improved its aggregate training yaw metric but still overshot a
+        # fixed 0.25 rad/s command in both Isaac and MuJoCo.  Keep symmetric
+        # tracking for recovery, then penalize only true pure-yaw overspeed.
+        self.rewards.yaw_overspeed_relative = RewTerm(
+            func=custom_mdp.yaw_overspeed_relative_l2,
+            weight=-4.0,
+            params={
+                "command_name": "base_velocity",
+                "command_min": 0.05,
+                "planar_command_threshold": 0.03,
+                "max_ratio": 1.0,
+            },
+        )
+
+        # A normalized band loss supplies a useful gradient at the observed
+        # 0.30 m stand, while remaining zero throughout the accepted range.
+        self.rewards.standing_base_height_band = RewTerm(
+            func=custom_mdp.standing_base_height_band_l2,
+            weight=-0.8,
+            params={
+                "command_name": "base_velocity",
+                "lower_height": 0.31,
+                "upper_height": 0.33,
+                "planar_command_threshold": 0.03,
+                "yaw_command_threshold": 0.05,
+                "velocity_threshold": 0.20,
+                "error_std": 0.02,
+                "max_error": 0.08,
+            },
+        )
+        self.rewards.joint_pos.weight = -0.10
+        self.rewards.joint_pos.params["stand_still_scale"] = 2.5
+        self.rewards.standing_foot_placement.weight = -0.50
+        self.rewards.hip_outward_band.params["standing_band"] = (-0.02, 0.10)
+
+
+@configclass
+class RobotOmniTrotClosedLoopPolishA2PlayEnvCfg(RobotOmniTrotClosedLoopPolishA2EnvCfg):
+    def __post_init__(self):
+        super().__post_init__()
+        self.scene.num_envs = 32
+        self.scene.terrain.terrain_generator.num_rows = 2
+        self.scene.terrain.terrain_generator.num_cols = 1
+        self.commands.base_velocity.ranges = self.commands.base_velocity.limit_ranges
+
+
+@configclass
+class RobotOmniTrotClosedLoopCrossPhysicsEnvCfg(RobotOmniTrotClosedLoopPolishA2EnvCfg):
+    """Adapt Stage A to bounded actuator and rigid-body physics variation."""
+
+    def __post_init__(self):
+        super().__post_init__()
+
+        # A2 is accurate to slightly conservative in Isaac; its residual yaw
+        # overshoot appears only in MuJoCo. Do not bias the nominal policy
+        # further. Instead expose it to a bounded family of physical systems.
+        self.rewards.yaw_overspeed_relative = None
+        self.events.physics_material.params.update(
+            {
+                "static_friction_range": (0.55, 1.20),
+                "dynamic_friction_range": (0.50, 1.15),
+                "restitution_range": (0.0, 0.08),
+            }
+        )
+        self.events.add_base_mass.params["mass_distribution_params"] = (-0.5, 0.5)
+        self.events.scale_body_mass = EventTerm(
+            func=mdp.randomize_rigid_body_mass,
+            mode="startup",
+            params={
+                "asset_cfg": SceneEntityCfg("robot", body_names=".*"),
+                "mass_distribution_params": (0.95, 1.05),
+                "operation": "scale",
+            },
+        )
+        self.events.randomize_base_com = EventTerm(
+            func=mdp.randomize_rigid_body_com,
+            mode="startup",
+            params={
+                "asset_cfg": SceneEntityCfg("robot", body_names="base"),
+                "com_range": {
+                    "x": (-0.015, 0.015),
+                    "y": (-0.015, 0.015),
+                    "z": (-0.010, 0.010),
+                },
+            },
+        )
+        self.events.randomize_actuator_gains = EventTerm(
+            func=mdp.randomize_actuator_gains,
+            mode="startup",
+            params={
+                "asset_cfg": SceneEntityCfg("robot", joint_names=".*"),
+                "stiffness_distribution_params": (0.85, 1.15),
+                "damping_distribution_params": (0.75, 1.35),
+                "operation": "scale",
+                "distribution": "log_uniform",
+            },
+        )
+        self.events.randomize_joint_friction = EventTerm(
+            func=mdp.randomize_joint_parameters,
+            mode="startup",
+            params={
+                "asset_cfg": SceneEntityCfg("robot", joint_names=".*"),
+                "friction_distribution_params": (0.0, 0.03),
+                "operation": "abs",
+                "distribution": "uniform",
+            },
+        )
+        for actuator in self.scene.robot.actuators.values():
+            actuator.min_delay = 0
+            actuator.max_delay = 2
+
+
+@configclass
+class RobotOmniTrotClosedLoopCrossPhysicsPlayEnvCfg(
+    RobotOmniTrotClosedLoopCrossPhysicsEnvCfg
+):
+    def __post_init__(self):
+        super().__post_init__()
+        self.scene.num_envs = 32
+        self.scene.terrain.terrain_generator.num_rows = 2
+        self.scene.terrain.terrain_generator.num_cols = 1
+        self.commands.base_velocity.ranges = self.commands.base_velocity.limit_ranges
+
+
+@configclass
+class RobotOmniTrotClosedLoopRobustFoundationEnvCfg(
+    RobotOmniTrotClosedLoopCrossPhysicsEnvCfg
+):
+    """From-scratch Stage-A teacher with salient yaw feedback and bounded physics."""
+
+    def __post_init__(self):
+        super().__post_init__()
+
+        # The inherited Go2 scale makes a full 0.25 rad/s yaw command only
+        # 0.05 in observation space. Keep roll/pitch scaling conservative but
+        # expose yaw rate at the same scale as the command and planar velocity.
+        self.observations.policy.base_ang_vel.scale = (0.2, 0.2, 1.0)
+        self.observations.policy.base_ang_vel.noise = Unoise(n_min=-0.10, n_max=0.10)
+        self.observations.critic.base_ang_vel.scale = (0.2, 0.2, 1.0)
+
+        command = self.commands.base_velocity
+        command.rel_standing_envs = 0.25
+        command.bucket_probabilities = (0.18, 0.10, 0.52, 0.20)
+        command.rel_low_speed_yaw = 0.50
+        command.rel_high_speed_yaw = 0.40
+        command.high_speed_yaw_range = (0.20, 0.25)
+
+        # Physics variation should make feedback useful, while this asymmetric
+        # term prevents a robust policy from choosing systematic yaw overspeed.
+        self.rewards.yaw_overspeed_relative = RewTerm(
+            func=custom_mdp.yaw_overspeed_relative_l2,
+            weight=-2.0,
+            params={
+                "command_name": "base_velocity",
+                "command_min": 0.05,
+                "planar_command_threshold": 0.03,
+                "max_ratio": 1.0,
+            },
+        )
+
+
+@configclass
+class RobotOmniTrotClosedLoopRobustFoundationPlayEnvCfg(
+    RobotOmniTrotClosedLoopRobustFoundationEnvCfg
+):
+    def __post_init__(self):
+        super().__post_init__()
+        self.scene.num_envs = 32
+        self.scene.terrain.terrain_generator.num_rows = 2
+        self.scene.terrain.terrain_generator.num_cols = 1
+        self.commands.base_velocity.ranges = self.commands.base_velocity.limit_ranges
+
+
+@configclass
+class RobotOmniTrotRobustStandFixEnvCfg(
+    RobotOmniTrotClosedLoopRobustFoundationEnvCfg
+):
+    """Repair the robust teacher's zero-command pose without shaping motion hips."""
+
+    def __post_init__(self):
+        super().__post_init__()
+
+        command = self.commands.base_velocity
+        command.resampling_time_range = (8.0, 12.0)
+        command.rel_standing_envs = 0.45
+
+        # RF_700 passes all moving-command absolute gates. These normalized
+        # terms are exactly zero outside the joystick dead-zone so lateral and
+        # yaw motion keep their required hip freedom.
+        self.rewards.standing_base_height_band.weight = -1.5
+        self.rewards.standing_hip_pose = RewTerm(
+            func=custom_mdp.standing_joint_deviation_normalized_l2,
+            weight=-0.70,
+            params={
+                "asset_cfg": SceneEntityCfg(
+                    "robot",
+                    joint_names=[
+                        "FR_hip_joint",
+                        "FL_hip_joint",
+                        "RR_hip_joint",
+                        "RL_hip_joint",
+                    ],
+                    preserve_order=True,
+                ),
+                "command_name": "base_velocity",
+                "planar_command_threshold": 0.03,
+                "yaw_command_threshold": 0.05,
+                "velocity_threshold": 0.20,
+                "position_std": 0.08,
+                "max_error": 0.30,
+            },
+        )
+        self.rewards.standing_orientation = RewTerm(
+            func=custom_mdp.standing_orientation_normalized_l2,
+            weight=-0.25,
+            params={
+                "command_name": "base_velocity",
+                "planar_command_threshold": 0.03,
+                "yaw_command_threshold": 0.05,
+                "velocity_threshold": 0.20,
+                "tilt_std_deg": 3.0,
+            },
+        )
+        self.rewards.standing_foot_placement.weight = -0.70
+
+
+@configclass
+class RobotOmniTrotRobustStandFixPlayEnvCfg(RobotOmniTrotRobustStandFixEnvCfg):
+    def __post_init__(self):
+        super().__post_init__()
+        self.scene.num_envs = 32
+        self.scene.terrain.terrain_generator.num_rows = 2
+        self.scene.terrain.terrain_generator.num_cols = 1
+        self.commands.base_velocity.ranges = self.commands.base_velocity.limit_ranges
+
+
+@configclass
+class RobotStandExpertEnvCfg(RobotOmniTrotClosedLoopRobustFoundationEnvCfg):
+    """Independent upright expert trained only on exact zero velocity commands."""
+
+    def __post_init__(self):
+        super().__post_init__()
+
+        command = self.commands.base_velocity
+        command.rel_standing_envs = 1.0
+        command.resampling_time_range = (20.0, 20.0)
+        self.curriculum.lin_vel_cmd_levels = None
+        self.curriculum.omni_velocity_cmd_levels = None
+
+        # Learn recovery from the small posture and joint errors expected at a
+        # locomotion-to-stand handoff, while leaving large falls to Recovery.
+        self.events.reset_base.params["pose_range"].update(
+            {"roll": (-0.10, 0.10), "pitch": (-0.10, 0.10)}
+        )
+        self.events.reset_base.params["velocity_range"].update(
+            {
+                "x": (-0.15, 0.15),
+                "y": (-0.15, 0.15),
+                "z": (-0.10, 0.10),
+                "roll": (-0.20, 0.20),
+                "pitch": (-0.20, 0.20),
+                "yaw": (-0.15, 0.15),
+            }
+        )
+        self.events.reset_robot_joints.params["position_range"] = (0.85, 1.15)
+        self.events.reset_robot_joints.params["velocity_range"] = (-0.30, 0.30)
+
+        # No gait is rewarded in this task. The exported 51-D contract is
+        # intentionally retained so the router and locomotion expert share the
+        # same sensors, ordering, and deployment code.
+        self.rewards.trot_contact_schedule = None
+        self.rewards.trot_stance_swing_tracking = None
+        self.rewards.feet_air_time_command_aware = None
+        self.rewards.foot_clearance_style = None
+        self.rewards.all_motion_swing_count = None
+        self.rewards.pure_axis_velocity_decoupling = None
+        self.rewards.track_velocity_components_relative_l1 = None
+        self.rewards.yaw_overspeed_relative = None
+
+        self.rewards.track_lin_vel_xy.weight = 3.0
+        self.rewards.track_lin_vel_xy.params["std"] = 0.12
+        self.rewards.track_ang_vel_z.weight = 2.0
+        self.rewards.track_ang_vel_z.params["std"] = 0.12
+        self.rewards.track_lin_vel_xy_l2.weight = -2.0
+        self.rewards.track_ang_vel_z_l2.weight = -2.0
+        self.rewards.inactive_velocity_axes_l2.weight = -5.0
+        self.rewards.inactive_velocity_axes_l2.params["axis_weights"] = (1.0, 1.0, 1.0)
+
+        self.rewards.speed_adaptive_base_height.weight = -100.0
+        self.rewards.standing_base_height_band.weight = -4.0
+        self.rewards.flat_orientation_l2.weight = -8.0
+        self.rewards.base_angular_velocity.weight = -0.50
+        self.rewards.base_linear_velocity.weight = -4.0
+        self.rewards.joint_pos.weight = -0.05
+        self.rewards.joint_pos.params["stand_still_scale"] = 1.0
+        self.rewards.action_rate.weight = -0.10
+        self.rewards.action_smoothness_2.weight = -0.05
+        self.rewards.energy.weight = -1.0e-4
+        self.rewards.standing_foot_placement.weight = -0.80
+        self.rewards.hip_outward_band.weight = -8.0
+
+        self.rewards.standing_hip_pose = RewTerm(
+            func=custom_mdp.standing_joint_deviation_normalized_l2,
+            weight=-1.0,
+            params={
+                "asset_cfg": SceneEntityCfg(
+                    "robot",
+                    joint_names=[
+                        "FR_hip_joint",
+                        "FL_hip_joint",
+                        "RR_hip_joint",
+                        "RL_hip_joint",
+                    ],
+                    preserve_order=True,
+                ),
+                "command_name": "base_velocity",
+                "planar_command_threshold": 0.03,
+                "yaw_command_threshold": 0.05,
+                "velocity_threshold": 1.0,
+                "position_std": 0.08,
+                "max_error": 0.30,
+            },
+        )
+        self.rewards.standing_orientation = RewTerm(
+            func=custom_mdp.standing_orientation_normalized_l2,
+            weight=-1.0,
+            params={
+                "command_name": "base_velocity",
+                "planar_command_threshold": 0.03,
+                "yaw_command_threshold": 0.05,
+                "velocity_threshold": 1.0,
+                "tilt_std_deg": 3.0,
+            },
+        )
+        self.rewards.standing_stable_support = RewTerm(
+            func=custom_mdp.recovery_stable_support,
+            weight=2.0,
+            params={
+                "prone_height": 0.20,
+                "standing_height": 0.31,
+                "angular_velocity_std": 0.35,
+                "contact_force_threshold": 10.0,
+                "asset_cfg": SceneEntityCfg("robot"),
+                "sensor_cfg": SceneEntityCfg(
+                    "contact_forces",
+                    body_names=["FR_foot", "FL_foot", "RR_foot", "RL_foot"],
+                    preserve_order=True,
+                ),
+            },
+        )
+
+
+@configclass
+class RobotStandExpertPlayEnvCfg(RobotStandExpertEnvCfg):
+    def __post_init__(self):
+        super().__post_init__()
+        self.scene.num_envs = 32
+        self.scene.terrain.terrain_generator.num_rows = 2
+        self.scene.terrain.terrain_generator.num_cols = 1
+        self.commands.base_velocity.ranges = self.commands.base_velocity.limit_ranges
+
+
+@configclass
+class RobotStandHeightCalibratedEnvCfg(RobotStandExpertEnvCfg):
+    """Compensate the measured Isaac-to-MuJoCo standing-height offset."""
+
+    def __post_init__(self):
+        super().__post_init__()
+
+        # StandExpert model_200 transfers 15-20 mm lower in MuJoCo while its
+        # tilt, drift, and hip limits already pass. Shift only the training
+        # target; deployment is still judged against the unchanged 0.31-0.335
+        # m MuJoCo gate.
+        self.rewards.speed_adaptive_base_height.params["standing_height"] = 0.35
+        self.rewards.standing_base_height_band.weight = -6.0
+        self.rewards.standing_base_height_band.params.update(
+            {
+                "lower_height": 0.335,
+                "upper_height": 0.355,
+                "error_std": 0.015,
+            }
+        )
+        self.rewards.flat_orientation_l2.weight = -10.0
+        self.rewards.standing_orientation.weight = -1.25
+        self.rewards.hip_outward_band.weight = -10.0
+        self.rewards.standing_hip_pose.weight = -1.25
+
+
+@configclass
+class RobotStandHeightCalibratedPlayEnvCfg(RobotStandHeightCalibratedEnvCfg):
+    def __post_init__(self):
+        super().__post_init__()
+        self.scene.num_envs = 32
+        self.scene.terrain.terrain_generator.num_rows = 2
+        self.scene.terrain.terrain_generator.num_cols = 1
+        self.commands.base_velocity.ranges = self.commands.base_velocity.limit_ranges
+
+
+@configclass
+class RobotStandHeightHipCalibratedEnvCfg(RobotStandHeightCalibratedEnvCfg):
+    """Finish the transfer-height correction while restoring compact stand hips."""
+
+    def __post_init__(self):
+        super().__post_init__()
+
+        self.rewards.speed_adaptive_base_height.params["standing_height"] = 0.365
+        self.rewards.standing_base_height_band.weight = -8.0
+        self.rewards.standing_base_height_band.params.update(
+            {
+                "lower_height": 0.350,
+                "upper_height": 0.370,
+                "error_std": 0.015,
+            }
+        )
+        self.rewards.hip_outward_band.weight = -20.0
+        self.rewards.standing_hip_pose.weight = -3.0
+
+
+@configclass
+class RobotStandHeightHipCalibratedPlayEnvCfg(RobotStandHeightHipCalibratedEnvCfg):
+    def __post_init__(self):
+        super().__post_init__()
+        self.scene.num_envs = 32
+        self.scene.terrain.terrain_generator.num_rows = 2
+        self.scene.terrain.terrain_generator.num_cols = 1
+        self.commands.base_velocity.ranges = self.commands.base_velocity.limit_ranges
+
+
+@configclass
+class RobotOmniTrotClosedLoopSelectiveCollisionEnvCfg(
+    RobotOmniTrotClosedLoopRobustFoundationEnvCfg
+):
+    """Opt-in Stage-A task with cross-leg contact and same-leg filtering."""
+
+    def __post_init__(self):
+        super().__post_init__()
+        # Preserve the inherited actuator-delay configuration and replace only
+        # the spawner contract that controls articulation self-contact.
+        self.scene.robot.spawn = CUSTOM_DOG_SELECTIVE_SELF_COLLISION_CFG.spawn.copy()
+
+
+@configclass
+class RobotOmniTrotClosedLoopSelectiveCollisionPlayEnvCfg(
+    RobotOmniTrotClosedLoopSelectiveCollisionEnvCfg
+):
+    def __post_init__(self):
+        super().__post_init__()
+        self.scene.num_envs = 1
+        self.scene.terrain.terrain_generator.num_rows = 1
+        self.scene.terrain.terrain_generator.num_cols = 1
+        self.commands.base_velocity.ranges = self.commands.base_velocity.limit_ranges
+
+
+@configclass
+class RobotOmniTrotClosedLoopStandFixEnvCfg(RobotOmniTrotClosedLoopPolishA2EnvCfg):
+    """Remove the zero-command hip/tilt exploit without changing locomotion."""
+
+    def __post_init__(self):
+        super().__post_init__()
+
+        self.commands.base_velocity.rel_standing_envs = 0.35
+        # A2 yaw is accurate inside Isaac.  Keep its policy unchanged while
+        # the remaining cross-simulator response gap is calibrated separately.
+        self.rewards.yaw_overspeed_relative = None
+        self.rewards.standing_hip_pose = RewTerm(
+            func=custom_mdp.standing_joint_deviation_normalized_l2,
+            weight=-0.50,
+            params={
+                "asset_cfg": SceneEntityCfg(
+                    "robot",
+                    joint_names=[
+                        "FR_hip_joint",
+                        "FL_hip_joint",
+                        "RR_hip_joint",
+                        "RL_hip_joint",
+                    ],
+                    preserve_order=True,
+                ),
+                "command_name": "base_velocity",
+                "planar_command_threshold": 0.03,
+                "yaw_command_threshold": 0.05,
+                "velocity_threshold": 0.20,
+                "position_std": 0.06,
+                "max_error": 0.30,
+            },
+        )
+        self.rewards.standing_orientation = RewTerm(
+            func=custom_mdp.standing_orientation_normalized_l2,
+            weight=-0.35,
+            params={
+                "command_name": "base_velocity",
+                "planar_command_threshold": 0.03,
+                "yaw_command_threshold": 0.05,
+                "velocity_threshold": 0.20,
+                "tilt_std_deg": 3.0,
+            },
+        )
+
+
+@configclass
+class RobotOmniTrotClosedLoopStandFixPlayEnvCfg(RobotOmniTrotClosedLoopStandFixEnvCfg):
+    def __post_init__(self):
+        super().__post_init__()
+        self.scene.num_envs = 32
+        self.scene.terrain.terrain_generator.num_rows = 2
+        self.scene.terrain.terrain_generator.num_cols = 1
+        self.commands.base_velocity.ranges = self.commands.base_velocity.limit_ranges
+
+
+@configclass
+class RobotOmniTrotClosedLoopStageBEnvCfg(
+    RobotOmniTrotClosedLoopSelectiveCollisionEnvCfg
+):
+    """Stage B envelope after the foundation grid passes sim2sim."""
+
+    def __post_init__(self):
+        super().__post_init__()
+        command = self.commands.base_velocity
+        command.ranges = command.Ranges(
+            lin_vel_x=(-0.80, 0.80),
+            lin_vel_y=(-0.20, 0.20),
+            ang_vel_z=(-0.50, 0.50),
+        )
+        command.limit_ranges = command.Ranges(
+            lin_vel_x=(-0.80, 0.80),
+            lin_vel_y=(-0.20, 0.20),
+            ang_vel_z=(-0.50, 0.50),
+        )
+        command.low_speed_y_range = (0.03, 0.20)
+        command.low_speed_yaw_range = (0.05, 0.30)
+
+
+@configclass
+class RobotOmniTrotClosedLoopStageBPlayEnvCfg(RobotOmniTrotClosedLoopStageBEnvCfg):
+    def __post_init__(self):
+        super().__post_init__()
+        self.scene.num_envs = 32
+        self.scene.terrain.terrain_generator.num_rows = 2
+        self.scene.terrain.terrain_generator.num_cols = 1
+        self.commands.base_velocity.ranges = self.commands.base_velocity.limit_ranges
+
+
+@configclass
+class RobotOmniTrotClosedLoopStageCEnvCfg(RobotOmniTrotClosedLoopStageBEnvCfg):
+    """Stage C envelope for medium-speed omni tracking."""
+
+    def __post_init__(self):
+        super().__post_init__()
+        command = self.commands.base_velocity
+        command.ranges = command.Ranges(
+            lin_vel_x=(-1.50, 1.50),
+            lin_vel_y=(-0.40, 0.40),
+            ang_vel_z=(-1.00, 1.00),
+        )
+        command.limit_ranges = command.Ranges(
+            lin_vel_x=(-1.50, 1.50),
+            lin_vel_y=(-0.40, 0.40),
+            ang_vel_z=(-1.00, 1.00),
+        )
+
+
+@configclass
+class RobotOmniTrotClosedLoopStageCPlayEnvCfg(RobotOmniTrotClosedLoopStageCEnvCfg):
+    def __post_init__(self):
+        super().__post_init__()
+        self.scene.num_envs = 32
+        self.scene.terrain.terrain_generator.num_rows = 2
+        self.scene.terrain.terrain_generator.num_cols = 1
+        self.commands.base_velocity.ranges = self.commands.base_velocity.limit_ranges
+
+
+@configclass
+class RobotOmniTrotClosedLoopStageDEnvCfg(RobotOmniTrotClosedLoopStageCEnvCfg):
+    """Final user envelope; only use after A-C pass fixed-command gates."""
+
+    def __post_init__(self):
+        super().__post_init__()
+        command = self.commands.base_velocity
+        command.ranges = command.Ranges(
+            lin_vel_x=(-3.0, 3.0),
+            lin_vel_y=(-0.6, 0.6),
+            ang_vel_z=(-2.0, 2.0),
+        )
+        command.limit_ranges = command.Ranges(
+            lin_vel_x=(-3.0, 3.0),
+            lin_vel_y=(-0.6, 0.6),
+            ang_vel_z=(-2.0, 2.0),
+        )
+
+
+@configclass
+class RobotOmniTrotClosedLoopStageDPlayEnvCfg(RobotOmniTrotClosedLoopStageDEnvCfg):
+    def __post_init__(self):
+        super().__post_init__()
+        self.scene.num_envs = 32
+        self.scene.terrain.terrain_generator.num_rows = 2
+        self.scene.terrain.terrain_generator.num_cols = 1
+        self.commands.base_velocity.ranges = self.commands.base_velocity.limit_ranges
+
+
+@configclass
+class RobotOmniTrotClosedLoopGaitRobustEnvCfg(RobotOmniTrotClosedLoopStageDEnvCfg):
+    """WTW-style command-adaptive gait shaping without changing the 51-D actor."""
+
+    def __post_init__(self):
+        super().__post_init__()
+        self.commands.base_velocity.resampling_time_range = (8.0, 12.0)
+
+        # Frequency was already observable through the four-channel trot
+        # clock.  Keep the accepted range explicit while adapting clearance
+        # and landing width from the same velocity command.
+        for clock in (self.observations.policy.trot_clock, self.observations.critic.trot_clock):
+            clock.params.update({"min_frequency": 1.4, "max_frequency": 3.2, "full_speed": 3.0})
+        for reward in (self.rewards.trot_contact_schedule, self.rewards.trot_stance_swing_tracking):
+            reward.params.update({"min_frequency": 1.4, "max_frequency": 3.2, "full_speed": 3.0})
+
+        self.rewards.foot_clearance_style.params.update(
+            {
+                "target_height": 0.045,
+                "target_height_high": 0.080,
+                "full_speed": 3.0,
+                "std": 0.030,
+            }
+        )
+        self.rewards.foot_clearance_style.weight = 0.30
+        self.rewards.stance_foot_placement.params.update(
+            {"lateral_gain": 1.15, "yaw_gain": 1.10}
+        )
+        self.rewards.stance_foot_placement.weight = -0.10
+
+
+@configclass
+class RobotOmniTrotClosedLoopGaitRobustPlayEnvCfg(
+    RobotOmniTrotClosedLoopGaitRobustEnvCfg
+):
+    def __post_init__(self):
+        super().__post_init__()
+        self.scene.num_envs = 32
+        self.scene.terrain.terrain_generator.num_rows = 2
+        self.scene.terrain.terrain_generator.num_cols = 1
+        self.commands.base_velocity.ranges = self.commands.base_velocity.limit_ranges
+
+
+@configclass
+class RobotOmniTrotDynamicsTeacherEnvCfg(RobotOmniTrotClosedLoopGaitRobustEnvCfg):
+    """RMA-style teacher conditioned on the exact randomized dynamics."""
+
+    def __post_init__(self):
+        super().__post_init__()
+        self.observations.policy.dynamics_context = ObsTerm(
+            func=custom_mdp.privileged_dynamics_context,
+            params={
+                "startup_context_dim": 10,
+                "maximum_delay_steps": 2,
+                "asset_cfg": SceneEntityCfg("robot"),
+            },
+            clip=(-2.0, 2.0),
+        )
+        # Event terms execute in configuration order.  This term is appended
+        # after all inherited startup randomizers and records their result.
+        self.events.record_dynamics_context = EventTerm(
+            func=custom_mdp.record_privileged_dynamics_context,
+            mode="startup",
+            params={
+                "asset_cfg": SceneEntityCfg("robot"),
+                "nominal_base_com": (
+                    -0.00425258944579,
+                    0.00128121327661,
+                    -0.00191914629703,
+                ),
+            },
+        )
+
+
+@configclass
+class RobotOmniTrotDynamicsTeacherPlayEnvCfg(RobotOmniTrotDynamicsTeacherEnvCfg):
+    def __post_init__(self):
+        super().__post_init__()
+        self.scene.num_envs = 32
+        self.scene.terrain.terrain_generator.num_rows = 2
+        self.scene.terrain.terrain_generator.num_cols = 1
+        self.commands.base_velocity.ranges = self.commands.base_velocity.limit_ranges
+
+
+@configclass
+class RobotOmniTrotTerrainT0EnvCfg(RobotOmniTrotDynamicsTeacherEnvCfg):
+    """Gated mild-terrain branch retaining 40 percent flat-ground samples."""
+
+    def __post_init__(self):
+        super().__post_init__()
+        self.scene.terrain.terrain_generator = CUSTOM_DOG_TERRAIN_T0_CFG.copy()
+        self.scene.terrain.max_init_terrain_level = 1
+        self.curriculum.terrain_levels = CurrTerm(func=mdp.terrain_levels_vel)
+        # The first 8/20 terrain columns are flat. They continue to rehearse
+        # the full Stage-D envelope; only non-flat T0 columns are limited to B.
+        command = self.commands.base_velocity
+        command.ranges = command.limit_ranges
+        command.flat_terrain_type_count = 8
+        command.rough_terrain_ranges = command.Ranges(
+            lin_vel_x=(-0.8, 0.8),
+            lin_vel_y=(-0.2, 0.2),
+            ang_vel_z=(-0.5, 0.5),
+        )
+        # This reward measures foot z in a flat world frame.  On slopes and
+        # stairs it would encode the wrong terrain height; contact-clock and
+        # swing-count terms continue to require actual stepping.
+        self.rewards.foot_clearance_style = None
+        self.observations.critic.height_scan = ObsTerm(
+            func=mdp.height_scan,
+            params={"sensor_cfg": SceneEntityCfg("height_scanner")},
+            clip=(-1.0, 1.0),
+        )
+
+
+@configclass
+class RobotOmniTrotTerrainT0PlayEnvCfg(RobotOmniTrotTerrainT0EnvCfg):
+    def __post_init__(self):
+        super().__post_init__()
+        self.scene.num_envs = 32
+        self.scene.terrain.terrain_generator.num_rows = 2
+        self.scene.terrain.terrain_generator.num_cols = 4
+
+
+@configclass
+class RobotOmniTrotTerrainT1EnvCfg(RobotOmniTrotTerrainT0EnvCfg):
+    """Rougher blind-locomotion branch with 40 percent flat regression samples."""
+
+    def __post_init__(self):
+        super().__post_init__()
+        self.scene.terrain.terrain_generator = CUSTOM_DOG_TERRAIN_T1_CFG.copy()
+        # T1 has 8/20 flat columns. Flat environments retain D while rough,
+        # slope and low-step environments expand only to the Stage-C range.
+        command = self.commands.base_velocity
+        command.flat_terrain_type_count = 8
+        command.rough_terrain_ranges = command.Ranges(
+            lin_vel_x=(-1.5, 1.5),
+            lin_vel_y=(-0.4, 0.4),
+            ang_vel_z=(-1.0, 1.0),
+        )
+
+
+@configclass
+class RobotOmniTrotTerrainT1PlayEnvCfg(RobotOmniTrotTerrainT1EnvCfg):
+    def __post_init__(self):
+        super().__post_init__()
+        self.scene.num_envs = 32
+        self.scene.terrain.terrain_generator.num_rows = 2
+        self.scene.terrain.terrain_generator.num_cols = 4
+
+
+@configclass
+class RobotClosedLoopHistory213DistillationEnvCfg(
+    RobotOmniTrotTerrainT1EnvCfg
+):
+    """Distill the final terrain teacher into deployable proprio history."""
+
+    observations: ClosedLoopHistoryDistillationObservationsCfg = (
+        ClosedLoopHistoryDistillationObservationsCfg()
+    )
+
+    def __post_init__(self):
+        super().__post_init__()
+        self.observations.policy.trot_clock = None
+        self.observations.policy.base_lin_vel_xy = None
+        self.observations.policy.dynamics_context = None
+        for name in (
+            "base_ang_vel",
+            "projected_gravity",
+            "joint_pos_rel",
+            "joint_vel_rel",
+            "last_action",
+        ):
+            term = getattr(self.observations.policy, name)
+            term.history_length = 5
+            term.flatten_history_dim = True
+        self.observations.policy.velocity_commands.history_length = 1
+        self.observations.policy.velocity_commands.flatten_history_dim = True
+
+        self.observations.teacher.base_ang_vel.scale = (0.2, 0.2, 1.0)
+        self.observations.teacher.base_ang_vel.noise = Unoise(n_min=-0.10, n_max=0.10)
+        self.observations.teacher.dynamics_context = ObsTerm(
+            func=custom_mdp.privileged_dynamics_context,
+            params={
+                "startup_context_dim": 10,
+                "maximum_delay_steps": 2,
+                "asset_cfg": SceneEntityCfg("robot"),
+            },
+            clip=(-2.0, 2.0),
+        )
+
+
+@configclass
+class RobotClosedLoopHistory213DistillationPlayEnvCfg(
+    RobotClosedLoopHistory213DistillationEnvCfg
+):
+    def __post_init__(self):
+        super().__post_init__()
+        self.scene.num_envs = 32
+        self.scene.terrain.terrain_generator.num_rows = 2
+        self.scene.terrain.terrain_generator.num_cols = 1
+        self.commands.base_velocity.ranges = self.commands.base_velocity.limit_ranges
+
+
+@configclass
 class RobotOmniTrotPlayEnvCfg(RobotOmniTrotEnvCfg):
+    def __post_init__(self):
+        super().__post_init__()
+        self.scene.num_envs = 32
+        self.scene.terrain.terrain_generator.num_rows = 2
+        self.scene.terrain.terrain_generator.num_cols = 1
+        self.commands.base_velocity.ranges = self.commands.base_velocity.limit_ranges
+
+
+@configclass
+class RobotOmniTrotPostureEnvCfg(RobotOmniTrotEnvCfg):
+    """Refine body height, hip width, standing, and low-rate pure-yaw gait."""
+
+    def __post_init__(self):
+        super().__post_init__()
+
+        # Keep the full validated command envelope while sampling standing and
+        # pure-axis modes often enough to remove their current local optima.
+        command = self.commands.base_velocity
+        command.ranges = command.limit_ranges
+        command.bucket_probabilities = (0.25, 0.20, 0.25, 0.30)
+        command.rel_standing_envs = 0.12
+        command.rel_low_speed_yaw = 0.60
+        command.low_speed_yaw_range = (0.08, 0.40)
+
+        # A small yaw request must still produce the same diagonal stepping
+        # contract. With yaw_speed_scale=0.35 this activates near 0.08 rad/s.
+        gait_threshold = 0.025
+        self.observations.policy.trot_clock.params["command_threshold"] = gait_threshold
+        self.observations.critic.trot_clock.params["command_threshold"] = gait_threshold
+        self.rewards.trot_contact_schedule.params["command_threshold"] = gait_threshold
+        self.rewards.trot_stance_swing_tracking.params["command_threshold"] = gait_threshold
+
+        feet_cfg = SceneEntityCfg(
+            "robot",
+            body_names=["FR_foot", "FL_foot", "RR_foot", "RL_foot"],
+            preserve_order=True,
+        )
+        contact_cfg = SceneEntityCfg(
+            "contact_forces",
+            body_names=["FR_foot", "FL_foot", "RR_foot", "RL_foot"],
+            preserve_order=True,
+        )
+
+        # Bilateral height tracking prevents both the tall low-speed posture
+        # and the excessive high-speed crouch observed in MuJoCo.
+        self.rewards.speed_adaptive_base_height.weight = -80.0
+        self.rewards.speed_adaptive_base_height.params.update(
+            {
+                "standing_height": 0.33,
+                "crouched_height": 0.28,
+                "crouch_start_speed": 0.10,
+                "crouch_full_speed": 3.0,
+                "yaw_speed_scale": 0.35,
+            }
+        )
+
+        self.rewards.hip_outward_speed_style = RewTerm(
+            func=custom_mdp.hip_outward_speed_style_l2,
+            weight=-3.0,
+            params={
+                "standing_limit": 0.16,
+                "walking_limit": 0.22,
+                "high_speed_limit": 0.30,
+                "walking_speed": 0.35,
+                "high_speed": 2.0,
+                "lateral_limit_gain": 0.18,
+                "yaw_limit_gain": 0.08,
+                "command_name": "base_velocity",
+            },
+        )
+        self.rewards.joint_pos = RewTerm(
+            func=custom_mdp.joint_deviation_l2,
+            weight=-0.20,
+            params={
+                "asset_cfg": SceneEntityCfg("robot", joint_names=".*"),
+                "stand_still_scale": 4.0,
+                "velocity_threshold": 0.20,
+            },
+        )
+        self.rewards.inactive_velocity_axes_l2 = RewTerm(
+            func=custom_mdp.inactive_velocity_axes_l2,
+            weight=-4.0,
+            params={
+                "command_name": "base_velocity",
+                "command_min": (0.08, 0.04, 0.06),
+                "axis_weights": (1.5, 2.0, 1.0),
+            },
+        )
+
+        # Pure-yaw commands, including small ones, must contain an actual
+        # swing phase instead of an all-feet-planted torsional shuffle.
+        self.rewards.feet_air_time_command_aware = RewTerm(
+            func=custom_mdp.feet_air_time_command_aware,
+            weight=0.35,
+            params={
+                "sensor_cfg": contact_cfg,
+                "threshold": 0.12,
+                "command_name": "base_velocity",
+                "command_threshold": gait_threshold,
+                "yaw_speed_scale": 0.35,
+            },
+        )
+        self.rewards.foot_clearance_style = RewTerm(
+            func=custom_mdp.foot_clearance_speed_style,
+            weight=0.25,
+            params={
+                "sensor_cfg": contact_cfg,
+                "asset_cfg": feet_cfg,
+                "target_height": 0.055,
+                "std": 0.035,
+                "command_name": "base_velocity",
+                "command_threshold": gait_threshold,
+                "yaw_speed_scale": 0.35,
+            },
+        )
+        self.rewards.pure_axis_swing_count = RewTerm(
+            func=custom_mdp.pure_axis_swing_count,
+            weight=0.40,
+            params={
+                "sensor_cfg": contact_cfg,
+                "command_name": "base_velocity",
+                "forward_deadband": 0.06,
+                "lateral_minimum": 0.08,
+                "yaw_minimum": 0.08,
+                "target_airborne": 2.0,
+                "airborne_std": 0.75,
+            },
+        )
+
+
+@configclass
+class RobotOmniTrotPosturePlayEnvCfg(RobotOmniTrotPostureEnvCfg):
+    def __post_init__(self):
+        super().__post_init__()
+        self.scene.num_envs = 32
+        self.scene.terrain.terrain_generator.num_rows = 2
+        self.scene.terrain.terrain_generator.num_cols = 1
+        self.commands.base_velocity.ranges = self.commands.base_velocity.limit_ranges
+
+
+@configclass
+class RobotOmniTrotRefineEnvCfg(RobotOmniTrotPostureEnvCfg):
+    """Refine low-speed stepping, bounded hip motion, efficiency, and trunk stability."""
+
+    def __post_init__(self):
+        super().__post_init__()
+
+        command = self.commands.base_velocity
+        command.minimum_command_magnitude = 0.03
+        command.rel_low_speed_x = 0.65
+        command.low_speed_x_range = (0.03, 0.20)
+        command.rel_low_speed_y = 0.65
+        command.low_speed_y_range = (0.03, 0.20)
+        command.rel_low_speed_yaw = 0.70
+        command.low_speed_yaw_range = (0.05, 0.30)
+        command.rel_standing_envs = 0.12
+
+        # Keep the external 49-D contract while making the clock active for
+        # every deliberate command outside the joystick noise dead-zone.
+        planar_deadband = 0.03
+        yaw_deadband = 0.05
+        for clock in (self.observations.policy.trot_clock, self.observations.critic.trot_clock):
+            clock.params["command_threshold"] = planar_deadband
+            clock.params["yaw_command_threshold"] = yaw_deadband
+        for reward in (self.rewards.trot_contact_schedule, self.rewards.trot_stance_swing_tracking):
+            reward.params["command_threshold"] = planar_deadband
+            reward.params["yaw_command_threshold"] = yaw_deadband
+        self.rewards.trot_contact_schedule.weight = 2.0
+        self.rewards.trot_stance_swing_tracking.weight = 1.25
+
+        # Keep deliberate low-speed commands visible to the tracking loss.
+        self.rewards.track_velocity_components_relative_l1.weight = -1.0
+        self.rewards.track_velocity_components_relative_l1.params["command_min"] = (
+            0.03,
+            0.03,
+            0.05,
+        )
+        self.rewards.track_ang_vel_z_l2.weight = -1.0
+        self.rewards.track_lin_vel_xy_l2 = RewTerm(
+            func=custom_mdp.track_lin_vel_xy_l2,
+            weight=-0.75,
+            params={"command_name": "base_velocity"},
+        )
+
+        # A band permits modest ab/adduction. Pure forward/reverse stays
+        # compact, while lateral and yaw commands continuously widen the band.
+        self.rewards.hip_outward_speed_style = None
+        self.rewards.hip_outward_band = RewTerm(
+            func=custom_mdp.hip_outward_band_l2,
+            weight=-10.0,
+            params={
+                "standing_band": (-0.04, 0.16),
+                "walking_band": (-0.06, 0.18),
+                "high_speed_band": (-0.08, 0.22),
+                "walking_speed": 0.35,
+                "high_speed": 2.0,
+                "lateral_allowance": 0.18,
+                "yaw_allowance": 0.05,
+                "command_name": "base_velocity",
+            },
+        )
+        self.rewards.calf_pair_separation = RewTerm(
+            func=custom_mdp.paired_lateral_separation_l2,
+            weight=-3.0,
+            params={
+                "asset_cfg": SceneEntityCfg(
+                    "robot",
+                    body_names=["FR_calf", "FL_calf", "RR_calf", "RL_calf"],
+                    preserve_order=True,
+                ),
+                "minimum_separation": 0.18,
+                "violation_scale": 0.05,
+                "lateral_allowance": 0.05,
+                "yaw_allowance": 0.015,
+                "command_name": "base_velocity",
+            },
+        )
+
+        # Energy is an auxiliary style term. Trunk angle, roll/pitch rate and
+        # vertical speed directly address body shake without suppressing yaw.
+        self.rewards.energy.weight = -8.0e-5
+        self.rewards.flat_orientation_l2.weight = -8.0
+        self.rewards.base_angular_velocity.weight = -0.18
+        self.rewards.base_linear_velocity.weight = -3.5
+        self.rewards.action_rate.weight = -0.06
+        self.rewards.action_smoothness_2.weight = -0.035
+        self.rewards.speed_adaptive_base_height.weight = -100.0
+        self.rewards.speed_adaptive_base_height.params["crouched_height"] = 0.29
+
+        feet_cfg = SceneEntityCfg(
+            "robot",
+            body_names=["FR_foot", "FL_foot", "RR_foot", "RL_foot"],
+            preserve_order=True,
+        )
+        contact_cfg = SceneEntityCfg(
+            "contact_forces",
+            body_names=["FR_foot", "FL_foot", "RR_foot", "RL_foot"],
+            preserve_order=True,
+        )
+        self.rewards.feet_air_time_command_aware.weight = 0.50
+        self.rewards.feet_air_time_command_aware.params.update(
+            {"command_threshold": planar_deadband, "yaw_speed_scale": 1.0}
+        )
+        self.rewards.foot_clearance_style.weight = 0.35
+        self.rewards.foot_clearance_style.params.update(
+            {"command_threshold": planar_deadband, "yaw_speed_scale": 1.0}
+        )
+        self.rewards.all_motion_swing_count = RewTerm(
+            func=custom_mdp.motion_swing_count,
+            weight=0.60,
+            params={
+                "sensor_cfg": contact_cfg,
+                "command_name": "base_velocity",
+                "planar_deadband": planar_deadband,
+                "yaw_deadband": yaw_deadband,
+                "target_airborne": 2.0,
+                "airborne_std": 0.75,
+            },
+        )
+
+
+@configclass
+class RobotOmniTrotRefinePlayEnvCfg(RobotOmniTrotRefineEnvCfg):
     def __post_init__(self):
         super().__post_init__()
         self.scene.num_envs = 32

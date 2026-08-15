@@ -1,0 +1,271 @@
+{
+  "baseline_label": "A2_1350",
+  "duration_s": 10.0,
+  "warmup_s": 2.0,
+  "grid": [
+    [
+      0.0,
+      0.0,
+      0.0
+    ],
+    [
+      0.0,
+      0.0,
+      0.25
+    ],
+    [
+      0.0,
+      0.0,
+      -0.25
+    ]
+  ],
+  "summaries": {
+    "A2_1350": {
+      "commands_passed_absolute": 0,
+      "commands_passed_all": 0,
+      "total_commands": 3,
+      "passes_grid": false,
+      "max_errors": {
+        "vx": 0.002,
+        "vy": 0.012,
+        "wz": 0.079
+      },
+      "min_height_m": 0.311,
+      "max_tilt_deg": 5.15,
+      "mean_hip_outward_deg": 4.135833333333333,
+      "max_hip_outward_deg": 21.19,
+      "standing_mean_height_m": 0.315,
+      "standing_max_tilt_deg": 2.61,
+      "max_pure_yaw_xy_drift_m_s": 0.009210218509894324,
+      "max_pure_yaw_integral_bias_rad": 0.63,
+      "max_pure_yaw_integral_bias_rate_rad_s": 0.07875,
+      "min_ground_contact_transitions_moving": 23
+    }
+  },
+  "rows": [
+    {
+      "command_vx": 0.0,
+      "command_vy": 0.0,
+      "command_wz": 0.0,
+      "policy_command_vx": 0.0,
+      "policy_command_vy": 0.0,
+      "policy_command_wz": 0.0,
+      "measured_vx": 0.001,
+      "measured_vy": 0.0,
+      "measured_wz": 0.002,
+      "error_vx": 0.001,
+      "error_vy": 0.0,
+      "error_wz": 0.002,
+      "min_height_m": 0.311,
+      "mean_height_m": 0.315,
+      "max_tilt_deg": 2.61,
+      "hip_outward_mean_deg": 12.71,
+      "hip_outward_mean_per_leg_deg": [
+        15.8,
+        16.77,
+        8.55,
+        9.72
+      ],
+      "hip_outward_max_deg": 21.19,
+      "action_delta": 0.000231,
+      "action_delta2": 0.000462,
+      "foot_slip_m_s": 0.0053,
+      "foot_impact_mean_m_s": 0.0,
+      "foot_impact_max_m_s": 0.0,
+      "world_displacement_x_m": 0.01,
+      "world_displacement_y_m": 0.001,
+      "world_displacement_m": 0.01004987562112089,
+      "yaw_integral_measured_rad": 0.018,
+      "yaw_integral_requested_rad": 0.0,
+      "yaw_integral_bias_rad": 0.018,
+      "contact_duty_per_leg": [
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "contact_transitions_per_leg": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "candidate": "A2_1350",
+      "candidate_path": "/home/hsc/Dog_RL/custom_dog_stack/logs/rsl_rl/custom_dog_velocity/2026-08-14_17-53-06_closed_loop_a2_yaw_boundary_standing_band/evaluation/candidates/model_1350",
+      "command_index": 0,
+      "duration_s": 10.0,
+      "warmup_s": 2.0,
+      "absolute_gates": {
+        "vx": true,
+        "vy": true,
+        "wz": true,
+        "height": true,
+        "tilt": true,
+        "not_fallen": true,
+        "hip_outward": false,
+        "standing_height": true,
+        "standing_tilt": true
+      },
+      "relative_gates": {
+        "hip_mean": true,
+        "hip_max_preferred": true,
+        "action_delta": true,
+        "action_delta2": true,
+        "foot_slip": true
+      },
+      "passes_absolute": false,
+      "passes_relative": true,
+      "passes_all": false
+    },
+    {
+      "command_vx": 0.0,
+      "command_vy": 0.0,
+      "command_wz": 0.25,
+      "policy_command_vx": 0.0,
+      "policy_command_vy": 0.0,
+      "policy_command_wz": 0.25,
+      "measured_vx": -0.002,
+      "measured_vy": -0.011,
+      "measured_wz": 0.324,
+      "error_vx": 0.002,
+      "error_vy": 0.011,
+      "error_wz": 0.074,
+      "min_height_m": 0.325,
+      "mean_height_m": 0.334,
+      "max_tilt_deg": 4.48,
+      "hip_outward_mean_deg": -0.04500000000000004,
+      "hip_outward_mean_per_leg_deg": [
+        -1.43,
+        -2.1,
+        -0.29,
+        3.64
+      ],
+      "hip_outward_max_deg": 7.63,
+      "action_delta": 0.007618,
+      "action_delta2": 0.015236,
+      "foot_slip_m_s": 0.1043,
+      "foot_impact_mean_m_s": 0.6716,
+      "foot_impact_max_m_s": 1.5683,
+      "world_displacement_x_m": 0.063,
+      "world_displacement_y_m": 0.017,
+      "world_displacement_m": 0.0652533524043018,
+      "yaw_integral_measured_rad": 2.587,
+      "yaw_integral_requested_rad": 1.999,
+      "yaw_integral_bias_rad": 0.589,
+      "contact_duty_per_leg": [
+        0.62,
+        0.52,
+        0.59,
+        0.57
+      ],
+      "contact_transitions_per_leg": [
+        25,
+        26,
+        26,
+        33
+      ],
+      "candidate": "A2_1350",
+      "candidate_path": "/home/hsc/Dog_RL/custom_dog_stack/logs/rsl_rl/custom_dog_velocity/2026-08-14_17-53-06_closed_loop_a2_yaw_boundary_standing_band/evaluation/candidates/model_1350",
+      "command_index": 1,
+      "duration_s": 10.0,
+      "warmup_s": 2.0,
+      "absolute_gates": {
+        "vx": true,
+        "vy": true,
+        "wz": true,
+        "height": true,
+        "tilt": true,
+        "not_fallen": true,
+        "hip_outward": true,
+        "pure_yaw_xy_drift": true,
+        "pure_yaw_integral_bias_rate": false,
+        "gait_transitions": true
+      },
+      "relative_gates": {
+        "hip_mean": true,
+        "hip_max_preferred": true,
+        "action_delta": true,
+        "action_delta2": true,
+        "foot_slip": true
+      },
+      "passes_absolute": false,
+      "passes_relative": true,
+      "passes_all": false
+    },
+    {
+      "command_vx": 0.0,
+      "command_vy": 0.0,
+      "command_wz": -0.25,
+      "policy_command_vx": 0.0,
+      "policy_command_vy": 0.0,
+      "policy_command_wz": -0.25,
+      "measured_vx": -0.002,
+      "measured_vy": 0.012,
+      "measured_wz": -0.329,
+      "error_vx": 0.002,
+      "error_vy": 0.012,
+      "error_wz": 0.079,
+      "min_height_m": 0.324,
+      "mean_height_m": 0.333,
+      "max_tilt_deg": 5.15,
+      "hip_outward_mean_deg": -0.2575,
+      "hip_outward_mean_per_leg_deg": [
+        -2.2,
+        -1.5,
+        3.22,
+        -0.55
+      ],
+      "hip_outward_max_deg": 7.0,
+      "action_delta": 0.007325,
+      "action_delta2": 0.014649,
+      "foot_slip_m_s": 0.108,
+      "foot_impact_mean_m_s": 0.7223,
+      "foot_impact_max_m_s": 1.5848,
+      "world_displacement_x_m": 0.07,
+      "world_displacement_y_m": -0.023,
+      "world_displacement_m": 0.07368174807915459,
+      "yaw_integral_measured_rad": -2.628,
+      "yaw_integral_requested_rad": -1.999,
+      "yaw_integral_bias_rad": -0.63,
+      "contact_duty_per_leg": [
+        0.55,
+        0.61,
+        0.53,
+        0.61
+      ],
+      "contact_transitions_per_leg": [
+        23,
+        24,
+        34,
+        23
+      ],
+      "candidate": "A2_1350",
+      "candidate_path": "/home/hsc/Dog_RL/custom_dog_stack/logs/rsl_rl/custom_dog_velocity/2026-08-14_17-53-06_closed_loop_a2_yaw_boundary_standing_band/evaluation/candidates/model_1350",
+      "command_index": 2,
+      "duration_s": 10.0,
+      "warmup_s": 2.0,
+      "absolute_gates": {
+        "vx": true,
+        "vy": true,
+        "wz": true,
+        "height": true,
+        "tilt": true,
+        "not_fallen": true,
+        "hip_outward": true,
+        "pure_yaw_xy_drift": true,
+        "pure_yaw_integral_bias_rate": false,
+        "gait_transitions": true
+      },
+      "relative_gates": {
+        "hip_mean": true,
+        "hip_max_preferred": true,
+        "action_delta": true,
+        "action_delta2": true,
+        "foot_slip": true
+      },
+      "passes_absolute": false,
+      "passes_relative": true,
+      "passes_all": false
+    }
+  ]
+}

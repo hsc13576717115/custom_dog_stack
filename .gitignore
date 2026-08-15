@@ -38,6 +38,9 @@ deploy/candidates/*
 build/
 install/
 log/
+ros2/build_recovery_check/
+ros2/install_recovery_check/
+third_party/custom_dog_control_deps_ws/
 
 # Editors and operating systems
 .idea/

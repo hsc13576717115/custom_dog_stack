@@ -18,6 +18,7 @@ _POLICY_BASE_DIM = 45
 _CRITIC_BASE_DIM = 60
 _GAIT_PHASE_DIM = 2
 _TROT_CLOCK_DIM = 4
+_VELOCITY_FEEDBACK_DIM = 2
 _ACTION_DIM = 12
 
 
@@ -69,6 +70,7 @@ def _mirror_policy_observation(env, observation: torch.Tensor) -> torch.Tensor:
         _POLICY_BASE_DIM,
         _POLICY_BASE_DIM + _GAIT_PHASE_DIM,
         _POLICY_BASE_DIM + _TROT_CLOCK_DIM,
+        _POLICY_BASE_DIM + _TROT_CLOCK_DIM + _VELOCITY_FEEDBACK_DIM,
     )
     if observation.shape[-1] not in valid_dims:
         raise ValueError(
@@ -106,6 +108,16 @@ def _mirror_policy_observation(env, observation: torch.Tensor) -> torch.Tensor:
         mirrored[..., 45:49] = observation[..., 45:49].index_select(
             -1, torch.tensor((1, 0, 3, 2), device=observation.device)
         )
+    elif observation.shape[-1] == _POLICY_BASE_DIM + _TROT_CLOCK_DIM + _VELOCITY_FEEDBACK_DIM:
+        if getattr(env.cfg.observations.policy, "trot_clock", None) is None:
+            raise ValueError("A 51-D custom-dog policy must define trot_clock")
+        if getattr(env.cfg.observations.policy, "base_lin_vel_xy", None) is None:
+            raise ValueError("A 51-D custom-dog policy must define base_lin_vel_xy")
+        mirrored[..., 45:49] = observation[..., 45:49].index_select(
+            -1, torch.tensor((1, 0, 3, 2), device=observation.device)
+        )
+        # Body-frame planar velocity is a polar vector under the reflection.
+        mirrored[..., 49:51] *= observation.new_tensor([1.0, -1.0])
     return mirrored
 
 

@@ -1,0 +1,50 @@
+{
+  "contact": {
+    "isaac_body_dynamic_friction_range": [
+      1.0,
+      1.0
+    ],
+    "isaac_body_static_friction_range": [
+      1.0,
+      1.0
+    ],
+    "isaac_contact_offset_range_m": [
+      0.0004905000096186996,
+      0.0021799998357892036
+    ],
+    "mujoco_sliding_friction_range": [
+      1.0,
+      1.0
+    ],
+    "mujoco_solref_ranges": {
+      "damping_ratio": [
+        1.0,
+        1.0
+      ],
+      "time_constant_s": [
+        0.005,
+        0.02
+      ]
+    }
+  },
+  "counts": {
+    "bodies": 17,
+    "joints": 12
+  },
+  "gravity_max_error_m_s2": 0.0,
+  "isaac_task": "CustomDog-Velocity-OmniTrot-ClosedLoopFoundation-v1",
+  "max_body_mass_error_kg": 1.9073486345888568e-07,
+  "max_com_component_error_m": 2.452173950007186e-09,
+  "max_inertia_component_error_kg_m2": 4.136798299747557e-09,
+  "max_inertia_relative_error": 1.9389055069753598e-07,
+  "max_joint_friction_error_nm": 2.2351741811588166e-10,
+  "max_joint_limit_error_rad": 2.789165525207693e-07,
+  "max_position_gain_error_nm_rad": 0.0,
+  "max_velocity_gain_error_nm_s_rad": 0.0,
+  "mjcf": "/home/hsc/Dog_RL/custom_dog_stack/sim2sim/custom_dog/custom_dog.xml",
+  "timestep_error_s": 0.0,
+  "total_mass": {
+    "isaac_kg": 13.849160209298134,
+    "mujoco_kg": 13.849160000000001
+  }
+}

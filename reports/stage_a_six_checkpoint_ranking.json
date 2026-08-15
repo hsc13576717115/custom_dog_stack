@@ -1,0 +1,562 @@
+{
+  "evaluation": "A",
+  "accepted": false,
+  "selected": "model_999",
+  "selected_candidate": "/home/hsc/Dog_RL/custom_dog_stack/logs/rsl_rl/custom_dog_velocity/2026-08-14_15-13-55_omni_trot_closed_loop_foundation_seed42/evaluation/candidates/model_999",
+  "top_candidates": [
+    {
+      "label": "model_999",
+      "candidate": "/home/hsc/Dog_RL/custom_dog_stack/logs/rsl_rl/custom_dog_velocity/2026-08-14_15-13-55_omni_trot_closed_loop_foundation_seed42/evaluation/candidates/model_999",
+      "accepted": false,
+      "score": [
+        0,
+        3,
+        3,
+        1.16,
+        4.702,
+        10.172666666666665
+      ],
+      "safety_failures": 0,
+      "absolute_command_failures": [
+        {
+          "command_index": 0,
+          "gates": [
+            "standing_height"
+          ]
+        },
+        {
+          "command_index": 11,
+          "gates": [
+            "wz"
+          ]
+        },
+        {
+          "command_index": 12,
+          "gates": [
+            "wz"
+          ]
+        }
+      ],
+      "relative_command_failures": [],
+      "max_normalized_tracking_error": 1.16
+    },
+    {
+      "label": "model_975",
+      "candidate": "/home/hsc/Dog_RL/custom_dog_stack/logs/rsl_rl/custom_dog_velocity/2026-08-14_15-13-55_omni_trot_closed_loop_foundation_seed42/evaluation/candidates/model_975",
+      "accepted": false,
+      "score": [
+        0,
+        4,
+        3,
+        1.0899999999999999,
+        4.644666666666667,
+        9.838
+      ],
+      "safety_failures": 0,
+      "absolute_command_failures": [
+        {
+          "command_index": 0,
+          "gates": [
+            "standing_height"
+          ]
+        },
+        {
+          "command_index": 11,
+          "gates": [
+            "wz"
+          ]
+        },
+        {
+          "command_index": 12,
+          "gates": [
+            "wz"
+          ]
+        }
+      ],
+      "relative_command_failures": [
+        {
+          "command_index": 4,
+          "gates": [
+            "hip_mean"
+          ]
+        }
+      ],
+      "max_normalized_tracking_error": 1.0899999999999999
+    },
+    {
+      "label": "model_875",
+      "candidate": "/home/hsc/Dog_RL/custom_dog_stack/logs/rsl_rl/custom_dog_velocity/2026-08-14_15-13-55_omni_trot_closed_loop_foundation_seed42/evaluation/candidates/model_875",
+      "accepted": false,
+      "score": [
+        0,
+        15,
+        2,
+        1.26,
+        4.991333333333333,
+        10.211333333333332
+      ],
+      "safety_failures": 0,
+      "absolute_command_failures": [
+        {
+          "command_index": 0,
+          "gates": [
+            "standing_height"
+          ]
+        },
+        {
+          "command_index": 12,
+          "gates": [
+            "wz"
+          ]
+        }
+      ],
+      "relative_command_failures": [
+        {
+          "command_index": 0,
+          "gates": [
+            "hip_mean"
+          ]
+        },
+        {
+          "command_index": 1,
+          "gates": [
+            "hip_mean"
+          ]
+        },
+        {
+          "command_index": 2,
+          "gates": [
+            "hip_mean"
+          ]
+        },
+        {
+          "command_index": 3,
+          "gates": [
+            "hip_mean"
+          ]
+        },
+        {
+          "command_index": 4,
+          "gates": [
+            "hip_mean"
+          ]
+        },
+        {
+          "command_index": 6,
+          "gates": [
+            "hip_mean"
+          ]
+        },
+        {
+          "command_index": 7,
+          "gates": [
+            "hip_mean"
+          ]
+        },
+        {
+          "command_index": 8,
+          "gates": [
+            "hip_mean"
+          ]
+        },
+        {
+          "command_index": 9,
+          "gates": [
+            "hip_mean"
+          ]
+        },
+        {
+          "command_index": 10,
+          "gates": [
+            "hip_mean"
+          ]
+        },
+        {
+          "command_index": 11,
+          "gates": [
+            "hip_mean"
+          ]
+        },
+        {
+          "command_index": 12,
+          "gates": [
+            "hip_mean"
+          ]
+        },
+        {
+          "command_index": 13,
+          "gates": [
+            "hip_mean"
+          ]
+        }
+      ],
+      "max_normalized_tracking_error": 1.26
+    },
+    {
+      "label": "model_900",
+      "candidate": "/home/hsc/Dog_RL/custom_dog_stack/logs/rsl_rl/custom_dog_velocity/2026-08-14_15-13-55_omni_trot_closed_loop_foundation_seed42/evaluation/candidates/model_900",
+      "accepted": false,
+      "score": [
+        0,
+        16,
+        2,
+        1.15,
+        4.827999999999999,
+        10.024666666666667
+      ],
+      "safety_failures": 0,
+      "absolute_command_failures": [
+        {
+          "command_index": 0,
+          "gates": [
+            "standing_height"
+          ]
+        },
+        {
+          "command_index": 12,
+          "gates": [
+            "wz"
+          ]
+        }
+      ],
+      "relative_command_failures": [
+        {
+          "command_index": 0,
+          "gates": [
+            "hip_mean"
+          ]
+        },
+        {
+          "command_index": 1,
+          "gates": [
+            "hip_mean"
+          ]
+        },
+        {
+          "command_index": 2,
+          "gates": [
+            "hip_mean"
+          ]
+        },
+        {
+          "command_index": 3,
+          "gates": [
+            "hip_mean"
+          ]
+        },
+        {
+          "command_index": 4,
+          "gates": [
+            "hip_mean"
+          ]
+        },
+        {
+          "command_index": 5,
+          "gates": [
+            "hip_mean"
+          ]
+        },
+        {
+          "command_index": 7,
+          "gates": [
+            "hip_mean"
+          ]
+        },
+        {
+          "command_index": 8,
+          "gates": [
+            "hip_mean"
+          ]
+        },
+        {
+          "command_index": 9,
+          "gates": [
+            "hip_mean"
+          ]
+        },
+        {
+          "command_index": 10,
+          "gates": [
+            "hip_mean"
+          ]
+        },
+        {
+          "command_index": 11,
+          "gates": [
+            "hip_mean"
+          ]
+        },
+        {
+          "command_index": 12,
+          "gates": [
+            "hip_mean"
+          ]
+        },
+        {
+          "command_index": 13,
+          "gates": [
+            "hip_mean"
+          ]
+        },
+        {
+          "command_index": 14,
+          "gates": [
+            "hip_mean"
+          ]
+        }
+      ],
+      "max_normalized_tracking_error": 1.15
+    },
+    {
+      "label": "model_625",
+      "candidate": "/home/hsc/Dog_RL/custom_dog_stack/logs/rsl_rl/custom_dog_velocity/2026-08-14_15-13-55_omni_trot_closed_loop_foundation_seed42/evaluation/candidates/model_625",
+      "accepted": false,
+      "score": [
+        0,
+        17,
+        3,
+        1.27,
+        4.59,
+        10.633999999999999
+      ],
+      "safety_failures": 0,
+      "absolute_command_failures": [
+        {
+          "command_index": 0,
+          "gates": [
+            "standing_height"
+          ]
+        },
+        {
+          "command_index": 11,
+          "gates": [
+            "wz"
+          ]
+        },
+        {
+          "command_index": 12,
+          "gates": [
+            "wz"
+          ]
+        }
+      ],
+      "relative_command_failures": [
+        {
+          "command_index": 0,
+          "gates": [
+            "hip_mean",
+            "foot_slip"
+          ]
+        },
+        {
+          "command_index": 1,
+          "gates": [
+            "hip_mean"
+          ]
+        },
+        {
+          "command_index": 2,
+          "gates": [
+            "hip_mean"
+          ]
+        },
+        {
+          "command_index": 3,
+          "gates": [
+            "hip_mean"
+          ]
+        },
+        {
+          "command_index": 4,
+          "gates": [
+            "hip_mean"
+          ]
+        },
+        {
+          "command_index": 5,
+          "gates": [
+            "hip_mean"
+          ]
+        },
+        {
+          "command_index": 6,
+          "gates": [
+            "hip_mean"
+          ]
+        },
+        {
+          "command_index": 7,
+          "gates": [
+            "hip_mean"
+          ]
+        },
+        {
+          "command_index": 8,
+          "gates": [
+            "hip_mean"
+          ]
+        },
+        {
+          "command_index": 9,
+          "gates": [
+            "hip_mean"
+          ]
+        },
+        {
+          "command_index": 10,
+          "gates": [
+            "hip_mean"
+          ]
+        },
+        {
+          "command_index": 11,
+          "gates": [
+            "hip_mean"
+          ]
+        },
+        {
+          "command_index": 12,
+          "gates": [
+            "hip_mean"
+          ]
+        },
+        {
+          "command_index": 13,
+          "gates": [
+            "hip_mean"
+          ]
+        }
+      ],
+      "max_normalized_tracking_error": 1.27
+    },
+    {
+      "label": "model_775",
+      "candidate": "/home/hsc/Dog_RL/custom_dog_stack/logs/rsl_rl/custom_dog_velocity/2026-08-14_15-13-55_omni_trot_closed_loop_foundation_seed42/evaluation/candidates/model_775",
+      "accepted": false,
+      "score": [
+        0,
+        18,
+        3,
+        1.3900000000000001,
+        4.5280000000000005,
+        10.066
+      ],
+      "safety_failures": 0,
+      "absolute_command_failures": [
+        {
+          "command_index": 0,
+          "gates": [
+            "standing_height"
+          ]
+        },
+        {
+          "command_index": 11,
+          "gates": [
+            "wz"
+          ]
+        },
+        {
+          "command_index": 12,
+          "gates": [
+            "wz"
+          ]
+        }
+      ],
+      "relative_command_failures": [
+        {
+          "command_index": 0,
+          "gates": [
+            "hip_mean",
+            "foot_slip"
+          ]
+        },
+        {
+          "command_index": 1,
+          "gates": [
+            "hip_mean"
+          ]
+        },
+        {
+          "command_index": 2,
+          "gates": [
+            "hip_mean"
+          ]
+        },
+        {
+          "command_index": 3,
+          "gates": [
+            "hip_mean"
+          ]
+        },
+        {
+          "command_index": 4,
+          "gates": [
+            "hip_mean"
+          ]
+        },
+        {
+          "command_index": 5,
+          "gates": [
+            "hip_mean"
+          ]
+        },
+        {
+          "command_index": 6,
+          "gates": [
+            "hip_mean"
+          ]
+        },
+        {
+          "command_index": 7,
+          "gates": [
+            "hip_mean"
+          ]
+        },
+        {
+          "command_index": 8,
+          "gates": [
+            "hip_mean"
+          ]
+        },
+        {
+          "command_index": 9,
+          "gates": [
+            "hip_mean"
+          ]
+        },
+        {
+          "command_index": 10,
+          "gates": [
+            "hip_mean"
+          ]
+        },
+        {
+          "command_index": 11,
+          "gates": [
+            "hip_mean"
+          ]
+        },
+        {
+          "command_index": 12,
+          "gates": [
+            "hip_mean"
+          ]
+        },
+        {
+          "command_index": 13,
+          "gates": [
+            "hip_mean"
+          ]
+        },
+        {
+          "command_index": 14,
+          "gates": [
+            "hip_mean"
+          ]
+        }
+      ],
+      "max_normalized_tracking_error": 1.3900000000000001
+    }
+  ],
+  "selection_rule": "safety failures, failed command/gate groups, absolute command failures, worst normalized tracking error, mean tilt, mean maximum hip outward"
+}
