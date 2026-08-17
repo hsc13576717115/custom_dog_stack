@@ -55,6 +55,16 @@ def test_cleaned_leg_proxies_keep_visual_and_inertial_contract_unchanged() -> No
     )
 
 
+def test_default_isaac_asset_uses_the_calibrated_proxy_urdf() -> None:
+    asset_path = ROOT / "rl/src/custom_dog_rl/assets/custom_dog.py"
+    source = asset_path.read_text(encoding="utf-8")
+    default_cfg = source.split("CUSTOM_DOG_CFG =", maxsplit=1)[1].split(
+        "@sim_utils.clone", maxsplit=1
+    )[0]
+    assert "custom_dog_selective_collision.urdf" in default_cfg
+    assert ' / "custom_dog.urdf"' not in default_cfg
+
+
 def test_isaac_spawner_authors_every_filter_on_both_endpoints() -> None:
     asset_path = ROOT / "rl/src/custom_dog_rl/assets/custom_dog.py"
     module = ast.parse(asset_path.read_text(encoding="utf-8"))

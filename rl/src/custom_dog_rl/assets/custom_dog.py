@@ -49,7 +49,13 @@ class GoM8010Calf2To1Cfg(GoM8010DirectCfg):
 
 CUSTOM_DOG_CFG = UnitreeArticulationCfg(
     spawn=UnitreeUrdfFileCfg(
-        asset_path=str(CUSTOM_DOG_DESCRIPTION_DIR / "urdf" / "custom_dog.urdf"),
+        # Isaac uses calibrated primitive leg proxies. The canonical URDF keeps
+        # the complete engine-neutral collision model for ROS and Pinocchio.
+        asset_path=str(
+            CUSTOM_DOG_DESCRIPTION_DIR
+            / "urdf"
+            / "custom_dog_selective_collision.urdf"
+        ),
         collider_type="convex_hull",
         # The current CAD visual meshes overlap around adjacent joint housings.
         # Keep illegal ground-contact checks, but disable articulation self-contact.
@@ -145,9 +151,9 @@ def _spawn_custom_dog_with_selective_self_collisions(
     return prim
 
 
-# Opt-in variant: the default asset remains unchanged for historical checkpoints.
-# PhysX receives all self contacts, then filters the base-to-leg and same-leg
-# pairs so only contact between different legs remains.
+# Opt-in self-collision variant. Both Isaac configurations use the same calibrated
+# proxy URDF; this one additionally enables cross-leg contact and authors filters
+# for base-to-leg and same-leg pairs.
 CUSTOM_DOG_SELECTIVE_SELF_COLLISION_CFG = CUSTOM_DOG_CFG.copy()
 CUSTOM_DOG_SELECTIVE_SELF_COLLISION_CFG.spawn = CUSTOM_DOG_CFG.spawn.copy()
 CUSTOM_DOG_SELECTIVE_SELF_COLLISION_CFG.spawn.asset_path = str(

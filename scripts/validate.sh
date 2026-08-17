@@ -27,7 +27,9 @@ python -m py_compile \
     "${project_root}/sim2sim/unitree_deploy/prepare_controller.py" \
     "${project_root}/scripts/analyze_policy_trace.py" \
     "${project_root}/scripts/evaluate_mujoco_grid.py" \
-    "${project_root}/scripts/evaluate_self_righting_mujoco.py"
+    "${project_root}/scripts/evaluate_self_righting_mujoco.py" \
+    "${project_root}/scripts/generate_gazebo_point_foot_urdf.py" \
+    "${project_root}/scripts/generate_selective_collision_urdf.py"
 
 state_machine_test="$(mktemp /tmp/custom_dog_state_machine_test.XXXXXX)"
 trap 'rm -f "${state_machine_test}"' EXIT

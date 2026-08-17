@@ -44,11 +44,21 @@ class UrdfContractTest(unittest.TestCase):
     def test_mesh_references_resolve(self):
         prefix = "package://custom_dog_description/"
         meshes = self.robot.findall(".//mesh")
-        self.assertEqual(len(meshes), 34)
+        # Collision geometry uses engine-stable primitives; meshes are visual only.
+        self.assertEqual(len(meshes), 17)
         for mesh in meshes:
             uri = mesh.attrib["filename"]
             self.assertTrue(uri.startswith(prefix), uri)
             self.assertTrue((DESCRIPTION_DIR / uri.removeprefix(prefix)).is_file(), uri)
+
+    def test_every_canonical_link_has_one_primitive_collision(self):
+        for name, link in self.links.items():
+            collisions = link.findall("collision")
+            self.assertEqual(len(collisions), 1, name)
+            geometry = collisions[0].find("geometry")
+            self.assertIsNotNone(geometry, name)
+            self.assertEqual(len(geometry), 1, name)
+            self.assertIn(geometry[0].tag, {"box", "cylinder", "sphere"}, name)
 
     def test_mass_and_inertia_are_positive(self):
         total_mass = 0.0

@@ -59,12 +59,6 @@
         <color rgba="0.75294 0.75294 0.75294 1" />
       </material>
     </visual>
-    <collision>
-      <origin xyz="0 0 -0.09" rpy="0 0 0" />
-      <geometry>
-        <cylinder radius="0.035" length="0.17" />
-      </geometry>
-    </collision>
   </link>
   <link name="FR_calf">
     <inertial>
@@ -81,12 +75,6 @@
         <color rgba="1 1 1 1" />
       </material>
     </visual>
-    <collision>
-      <origin xyz="0 0 -0.09" rpy="0 0 0" />
-      <geometry>
-        <cylinder radius="0.022" length="0.15" />
-      </geometry>
-    </collision>
   </link>
   <link name="FR_foot">
     <inertial>
@@ -147,12 +135,6 @@
         <color rgba="0.752941176470588 0.752941176470588 0.752941176470588 1" />
       </material>
     </visual>
-    <collision>
-      <origin xyz="0 0 -0.09" rpy="0 0 0" />
-      <geometry>
-        <cylinder radius="0.035" length="0.17" />
-      </geometry>
-    </collision>
   </link>
   <link name="FL_calf">
     <inertial>
@@ -169,12 +151,6 @@
         <color rgba="1 1 1 1" />
       </material>
     </visual>
-    <collision>
-      <origin xyz="0 0 -0.09" rpy="0 0 0" />
-      <geometry>
-        <cylinder radius="0.022" length="0.15" />
-      </geometry>
-    </collision>
   </link>
   <link name="FL_foot">
     <inertial>
@@ -235,12 +211,6 @@
         <color rgba="0.752941176470588 0.752941176470588 0.752941176470588 1" />
       </material>
     </visual>
-    <collision>
-      <origin xyz="0 0 -0.09" rpy="0 0 0" />
-      <geometry>
-        <cylinder radius="0.035" length="0.17" />
-      </geometry>
-    </collision>
   </link>
   <link name="RR_calf">
     <inertial>
@@ -257,12 +227,6 @@
         <color rgba="1 1 1 1" />
       </material>
     </visual>
-    <collision>
-      <origin xyz="0 0 -0.09" rpy="0 0 0" />
-      <geometry>
-        <cylinder radius="0.022" length="0.15" />
-      </geometry>
-    </collision>
   </link>
   <link name="RR_foot">
     <inertial>
@@ -323,12 +287,6 @@
         <color rgba="0.752941176470588 0.752941176470588 0.752941176470588 1" />
       </material>
     </visual>
-    <collision>
-      <origin xyz="0 0 -0.09" rpy="0 0 0" />
-      <geometry>
-        <cylinder radius="0.035" length="0.17" />
-      </geometry>
-    </collision>
   </link>
   <link name="RL_calf">
     <inertial>
@@ -345,12 +303,6 @@
         <color rgba="1 1 1 1" />
       </material>
     </visual>
-    <collision>
-      <origin xyz="0 0 -0.09" rpy="0 0 0" />
-      <geometry>
-        <cylinder radius="0.022" length="0.15" />
-      </geometry>
-    </collision>
   </link>
   <link name="RL_foot">
     <inertial>
