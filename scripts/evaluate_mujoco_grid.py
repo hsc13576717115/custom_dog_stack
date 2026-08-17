@@ -422,12 +422,14 @@ def main() -> None:
         )
         for command_index, command in enumerate(grid):
             print(f"[{label}] command {command_index + 1}/{len(grid)}: {command}", flush=True)
+            encoder = candidate / "exported" / "encoder.onnx"
             process = subprocess.run(
                 runner_command + [
                     "--mjcf",
                     str(args.mjcf.resolve()),
                     "--policy",
                     str(policy),
+                    *( ["--encoder", str(encoder)] if encoder.is_file() else [] ),
                     "--deploy-yaml",
                     str(deploy),
                     *routed_args,
