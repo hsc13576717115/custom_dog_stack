@@ -9,6 +9,34 @@
 > 开发。本仓库继续保存机器人描述、ROS 2、MuJoCo、部署接口和历史实验，避免两套
 > 训练框架继续分叉。
 
+## 强化学习实机闭环验证
+
+强化学习主线最初以 `unitree_rl_lab` 建立训练基线，并参考 **Walk These Ways** 的
+步态与奖励设计优化运动表现；随后迁移至 HimLoco Lab，将历史观测状态估计器与策略
+训练统一到双网络框架。训练策略已经部署到自制 12 自由度四足机器人，在
+**Jetson NX Super + USB 转 RS485** 链路上完成实机闭环验证。
+
+以下内容分别展示实机闭环与 Isaac Lab 策略回放。仿真指标和实机结果独立记录，
+不以 MuJoCo 单项结果替代实机验证。
+
+### 自制四足实机闭环
+
+[![自制四足强化学习实机闭环](docs/media/custom-dog-rl-real-robot-preview.gif)](docs/media/custom-dog-rl-real-robot.mp4)
+
+[点击播放或下载完整实机 MP4](docs/media/custom-dog-rl-real-robot.mp4)
+
+### Isaac Lab 策略回放 A
+
+[![Isaac Lab策略回放A](docs/media/isaac-lab-policy-demo-a-preview.gif)](docs/media/isaac-lab-policy-demo-a.mp4)
+
+[点击播放或下载完整回放 A MP4](docs/media/isaac-lab-policy-demo-a.mp4)
+
+### Isaac Lab 策略回放 B
+
+[![Isaac Lab策略回放B](docs/media/isaac-lab-policy-demo-b-preview.gif)](docs/media/isaac-lab-policy-demo-b.mp4)
+
+[点击播放或下载完整回放 B MP4](docs/media/isaac-lab-policy-demo-b.mp4)
+
 ## 当前结论
 
 - 当前综合最佳 HimLoco 模型：**`model_12000`**。
@@ -22,9 +50,9 @@
   [`reports/himloco_terrain_refine_2026-08-17`](reports/himloco_terrain_refine_2026-08-17)。
 - 当前 locomotion 策略只负责从正常站姿开始运动，不具备跌倒后自主起身能力。
 
-“最佳”表示当前固定 MuJoCo 测试矩阵下的综合结果，不代表已经通过真实机器人验证，
-也不表示后续 checkpoint 一定更差。模型升级必须重新执行相同验收，不能只比较训练
-reward 或 checkpoint 编号。
+“最佳”表示当前固定 MuJoCo 测试矩阵下的综合结果，不代表 `model_12000` 这一特定
+checkpoint 已与上方实机视频完成一一绑定，也不表示后续 checkpoint 一定更差。
+模型升级必须重新执行相同验收，不能只比较训练 reward 或 checkpoint 编号。
 
 ## 后续开发边界
 
